@@ -1,0 +1,491 @@
+"""会議録音・文字起こしツールの簡易 GUI.
+
+録音の開始/停止と、文字起こしの実行だけを行う。
+結果は従来どおりファイル (transcript.txt) に出力する。
+
+録音は record.RecordingSession をそのまま使い、文字起こしは transcribe.py を
+サブプロセスとして呼ぶ。処理の実体を GUI 側に複製しないため。
+"""
+
+import os
+import queue
+import subprocess
+import sys
+import threading
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+
+import pyaudiowpatch as pyaudio
+
+import config
+import record
+
+from apppaths import ROOT, child_command  # noqa: E402
+
+MODELS = ["large-v3-turbo", "large-v3"]
+AUDIO_TYPES = [("音声・動画ファイル",
+                "*.wav *.mp3 *.m4a *.flac *.ogg *.aac *.wma *.mp4 *.mkv *.webm"),
+               ("すべてのファイル", "*.*")]
+
+
+def list_devices():
+    """(ループバック一覧, マイク一覧) を返す。要素は (表示名, index)."""
+    p = pyaudio.PyAudio()
+    try:
+        wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+        try:
+            default_lb = p.get_default_wasapi_loopback()["index"]
+        except Exception:
+            default_lb = None
+        default_mic = wasapi["defaultInputDevice"]
+
+        loopbacks, mics = [], []
+        for lb in p.get_loopback_device_info_generator():
+            mark = " ★既定" if lb["index"] == default_lb else ""
+            name = lb["name"].replace(" [Loopback]", "")
+            loopbacks.append((f"{name}{mark}", lb["index"]))
+
+        for i in range(p.get_device_count()):
+            d = p.get_device_info_by_index(i)
+            if d["hostApi"] != wasapi["index"]:
+                continue
+            if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False):
+                mark = " ★既定" if d["index"] == default_mic else ""
+                mics.append((f"{d['name']}{mark}", d["index"]))
+        return loopbacks, mics
+    finally:
+        p.terminate()
+
+
+def list_recordings(base=None):
+    base = Path(base) if base else config.recordings_dir()
+    if not base.exists():
+        return []
+    dirs = [d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()]
+    return sorted(dirs, key=lambda d: d.stat().st_mtime, reverse=True)
+
+
+class App(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master, padding=12)
+        self.grid(sticky="nsew")
+        master.columnconfigure(0, weight=1)
+        master.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self.session = None
+        self.proc = None
+        self.msg_queue = queue.Queue()
+
+        self._build_record_box()
+        self._build_transcribe_box()
+        self._build_log_box()
+
+        self.refresh_devices()
+        self.refresh_recordings()
+        self.after(100, self._drain_queue)
+
+    # ---------------------------------------------------------------- 録音
+    def _build_record_box(self):
+        box = ttk.LabelFrame(self, text=" 録音 ", padding=10)
+        box.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        box.columnconfigure(1, weight=1)
+
+        ttk.Label(box, text="相手 (PC の音):").grid(row=0, column=0, sticky="w", pady=2)
+        self.cb_loopback = ttk.Combobox(box, state="readonly", width=46)
+        self.cb_loopback.grid(row=0, column=1, sticky="ew", padx=(6, 4), pady=2)
+
+        ttk.Label(box, text="自分 (マイク):").grid(row=1, column=0, sticky="w", pady=2)
+        self.cb_mic = ttk.Combobox(box, state="readonly", width=46)
+        self.cb_mic.grid(row=1, column=1, sticky="ew", padx=(6, 4), pady=2)
+
+        ttk.Button(box, text="更新", width=6, command=self.refresh_devices).grid(
+            row=0, column=2, rowspan=2, padx=2)
+
+        ttk.Label(box, text="保存先:").grid(row=2, column=0, sticky="w", pady=(6, 2))
+        self.var_savedir = tk.StringVar(value=str(config.recordings_dir()))
+        ttk.Entry(box, textvariable=self.var_savedir, state="readonly").grid(
+            row=2, column=1, sticky="ew", padx=(6, 4), pady=(6, 2))
+        ttk.Button(box, text="変更", width=6, command=self.choose_savedir).grid(
+            row=2, column=2, padx=2, pady=(6, 2))
+
+        ctrl = ttk.Frame(box)
+        ctrl.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 2))
+        ctrl.columnconfigure(2, weight=1)
+
+        self.btn_record = ttk.Button(ctrl, text="● 録音開始", width=14,
+                                     command=self.toggle_record)
+        self.btn_record.grid(row=0, column=0)
+        self.lbl_time = ttk.Label(ctrl, text="00:00:00",
+                                  font=("Consolas", 16))
+        self.lbl_time.grid(row=0, column=1, padx=14)
+        self.lbl_state = ttk.Label(ctrl, text="待機中", foreground="gray")
+        self.lbl_state.grid(row=0, column=2, sticky="w")
+
+        meters = ttk.Frame(box)
+        meters.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        meters.columnconfigure(1, weight=1)
+        self.meters = {}
+        for i, label in enumerate(("相手", "自分")):
+            ttk.Label(meters, text=label, width=4).grid(row=i, column=0, sticky="w")
+            pb = ttk.Progressbar(meters, maximum=100, length=260)
+            pb.grid(row=i, column=1, sticky="ew", padx=6, pady=1)
+            db = ttk.Label(meters, text="  -- dB", width=9, font=("Consolas", 9))
+            db.grid(row=i, column=2, sticky="e")
+            self.meters[label] = (pb, db)
+
+    # ---------------------------------------------------------- 文字起こし
+    def _build_transcribe_box(self):
+        box = ttk.LabelFrame(self, text=" 文字起こし ", padding=10)
+        box.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        box.columnconfigure(1, weight=1)
+
+        ttk.Label(box, text="対象の録音:").grid(row=0, column=0, sticky="w", pady=2)
+        self.cb_rec = ttk.Combobox(box, state="readonly", width=46)
+        self.cb_rec.grid(row=0, column=1, sticky="ew", padx=(6, 4), pady=2)
+        self.cb_rec.bind("<<ComboboxSelected>>", lambda e: self._clear_picked())
+        ttk.Button(box, text="更新", width=6, command=self.refresh_recordings).grid(
+            row=0, column=2, padx=2)
+
+        pick = ttk.Frame(box)
+        pick.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 4))
+        ttk.Button(pick, text="音声ファイルを選ぶ...", width=20,
+                   command=self.choose_audio_file).grid(row=0, column=0)
+        self.lbl_picked = ttk.Label(pick, text="", foreground="#06c")
+        self.lbl_picked.grid(row=0, column=1, sticky="w", padx=8)
+        self.picked_file = None
+
+        ttk.Label(box, text="モデル:").grid(row=2, column=0, sticky="w", pady=2)
+        self.cb_model = ttk.Combobox(box, state="readonly", values=MODELS, width=22)
+        saved_model = config.load()["model"]
+        self.cb_model.current(MODELS.index(saved_model) if saved_model in MODELS else 0)
+        self.cb_model.grid(row=2, column=1, sticky="w", padx=(6, 4), pady=2)
+
+        opt = ttk.Frame(box)
+        opt.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 2))
+        self.var_diarize = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt, text="相手を話者ごとに分ける", variable=self.var_diarize,
+                        command=self._toggle_speakers).grid(row=0, column=0, sticky="w")
+        ttk.Label(opt, text="  相手の人数:").grid(row=0, column=1, sticky="w")
+        self.var_speakers = tk.StringVar(value="自動")
+        self.cb_speakers = ttk.Combobox(
+            opt, state="disabled", width=6, textvariable=self.var_speakers,
+            values=["自動", "2", "3", "4", "5", "6", "7", "8"])
+        self.cb_speakers.grid(row=0, column=2, padx=4)
+
+        run = ttk.Frame(box)
+        run.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        self.btn_transcribe = ttk.Button(run, text="文字起こしを実行", width=18,
+                                         command=self.start_transcribe)
+        self.btn_transcribe.grid(row=0, column=0)
+        ttk.Button(run, text="保存先を開く", width=14, command=self.open_folder).grid(
+            row=0, column=1, padx=8)
+
+    def _build_log_box(self):
+        box = ttk.LabelFrame(self, text=" ログ ", padding=6)
+        box.grid(row=2, column=0, sticky="nsew")
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        self.rowconfigure(2, weight=1)
+
+        self.txt = tk.Text(box, height=11, wrap="none", font=("Consolas", 9))
+        self.txt.grid(row=0, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(box, orient="vertical", command=self.txt.yview)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.txt.configure(yscrollcommand=sb.set, state="disabled")
+
+        self.lbl_progress = ttk.Label(box, text="", font=("Consolas", 9),
+                                      foreground="#0a6")
+        self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+    # ----------------------------------------------------------- ユーティリティ
+    def log(self, text):
+        self.txt.configure(state="normal")
+        self.txt.insert("end", text + "\n")
+        self.txt.see("end")
+        self.txt.configure(state="disabled")
+
+    def refresh_devices(self):
+        try:
+            loopbacks, mics = list_devices()
+        except Exception as exc:
+            messagebox.showerror("デバイス取得に失敗", str(exc))
+            return
+        self._loopbacks, self._mics = loopbacks, mics
+        self.cb_loopback["values"] = [n for n, _ in loopbacks]
+        self.cb_mic["values"] = [n for n, _ in mics]
+        for cb, items in ((self.cb_loopback, loopbacks), (self.cb_mic, mics)):
+            if items:
+                default = next((i for i, (n, _) in enumerate(items) if "★" in n), 0)
+                cb.current(default)
+
+    def refresh_recordings(self):
+        self._recordings = list_recordings(self.var_savedir.get())
+        self.cb_rec["values"] = [d.name for d in self._recordings]
+        if self._recordings:
+            self.cb_rec.current(0)
+
+    def choose_savedir(self):
+        d = filedialog.askdirectory(title="録音の保存先を選んでください",
+                                    initialdir=self.var_savedir.get())
+        if not d:
+            return
+        self.var_savedir.set(str(Path(d)))
+        config.save(recordings_dir=str(Path(d)))   # 次回以降もここに保存する
+        self.log(f"保存先を変更しました: {d}")
+        self.refresh_recordings()
+
+    def choose_audio_file(self):
+        f = filedialog.askopenfilename(title="文字起こしする音声ファイル",
+                                       filetypes=AUDIO_TYPES)
+        if not f:
+            return
+        self.picked_file = Path(f)
+        self.lbl_picked.configure(text=self.picked_file.name)
+        self.log(f"対象ファイル: {f}")
+
+    def _clear_picked(self):
+        """録音一覧を選び直したら、単体ファイル指定は解除する."""
+        if self.picked_file is not None:
+            self.picked_file = None
+            self.lbl_picked.configure(text="")
+
+    def _toggle_speakers(self):
+        self.cb_speakers.configure(
+            state="readonly" if self.var_diarize.get() else "disabled")
+
+    def open_folder(self):
+        if self.picked_file is not None:
+            os.startfile(str(self.picked_file.parent))
+            return
+        target = Path(self.var_savedir.get())
+        idx = self.cb_rec.current()
+        if 0 <= idx < len(getattr(self, "_recordings", [])):
+            target = self._recordings[idx]
+        target.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(target))
+
+    # -------------------------------------------------------------- 録音制御
+    def toggle_record(self):
+        if self.session is None:
+            self.start_record()
+        else:
+            self.stop_record()
+
+    def start_record(self):
+        if self.proc is not None:
+            messagebox.showwarning("実行中", "文字起こしの実行中は録音できません。")
+            return
+        try:
+            lb = self._loopbacks[self.cb_loopback.current()][1]
+            mic = self._mics[self.cb_mic.current()][1]
+        except (IndexError, AttributeError):
+            messagebox.showerror("デバイス未選択", "デバイスを選択してください。")
+            return
+
+        try:
+            self.session = record.RecordingSession(mic_index=mic, loopback_index=lb)
+            self.session.start()
+        except SystemExit as exc:
+            self.session = None
+            messagebox.showerror("録音を開始できません", str(exc))
+            return
+        except Exception as exc:
+            self.session = None
+            messagebox.showerror("録音を開始できません", str(exc))
+            return
+
+        self.btn_record.configure(text="■ 停止")
+        self.lbl_state.configure(text="録音中", foreground="#c00")
+        self.btn_transcribe.configure(state="disabled")
+        self.log(f"録音開始: {self.session.outdir.name}")
+        self.log("  両方のメーターが振れているか確認してください。")
+        self._tick()
+
+    def _tick(self):
+        if self.session is None:
+            return
+        self.lbl_time.configure(text=record.hhmmss(self.session.elapsed))
+        for r in self.session.recorders:
+            pb, db = self.meters[r.label]
+            _, decibels = record.bar(r.level)
+            pb["value"] = max(0.0, min(100.0, (decibels + 60.0) / 60.0 * 100.0))
+            db.configure(text=f"{decibels:6.1f} dB")
+        pending = self.session.pending
+        if pending:
+            self.lbl_state.configure(
+                text="録音中 (" + "/".join(pending) + " が応答待ち。マイクの許可を確認)",
+                foreground="#c60")
+        else:
+            self.lbl_state.configure(text="録音中", foreground="#c00")
+        self.after(150, self._tick)
+
+    def stop_record(self):
+        session, self.session = self.session, None
+        self.btn_record.configure(text="● 録音開始", state="disabled")
+        self.lbl_state.configure(text="停止しています...", foreground="gray")
+        self.update_idletasks()
+
+        def worker():
+            try:
+                session.stop()
+                lines = session.summary_lines()
+            except Exception as exc:
+                lines = [f"停止時にエラー: {exc}"]
+            finally:
+                session.close()
+            self.msg_queue.put(("record_done", (session.outdir, lines)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_record_done(self, payload):
+        outdir, lines = payload
+        for line in lines:
+            self.log("  " + line)
+        self.log(f"保存先: {outdir}")
+        self.log("")
+        self.btn_record.configure(state="normal")
+        self.btn_transcribe.configure(state="normal")
+        self.lbl_state.configure(text="待機中", foreground="gray")
+        for pb, db in self.meters.values():
+            pb["value"] = 0
+            db.configure(text="  -- dB")
+        self.refresh_recordings()
+
+    # ---------------------------------------------------------- 文字起こし制御
+    def start_transcribe(self):
+        if self.session is not None:
+            messagebox.showwarning("録音中", "先に録音を停止してください。")
+            return
+        if self.picked_file is not None:
+            target = self.picked_file
+        else:
+            idx = self.cb_rec.current()
+            if idx < 0 or not getattr(self, "_recordings", []):
+                messagebox.showinfo(
+                    "対象がありません",
+                    "先に録音するか、「音声ファイルを選ぶ...」で指定してください。")
+                return
+            target = self._recordings[idx]
+
+        config.save(model=self.cb_model.get())
+        cmd = child_command("transcribe", target,
+                            "--model", self.cb_model.get(), "--threads", "4")
+        if self.var_diarize.get():
+            cmd.append("--diarize")
+            if self.var_speakers.get() != "自動":
+                cmd += ["--speakers", self.var_speakers.get()]
+
+        self.btn_transcribe.configure(state="disabled")
+        self.btn_record.configure(state="disabled")
+        self.log(f"文字起こし開始: {target.name} ({self.cb_model.get()})")
+        self.log("  CPU 処理のため時間がかかります。完了までお待ちください。")
+
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        self.proc = subprocess.Popen(
+            cmd, cwd=str(ROOT), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, creationflags=getattr(
+                subprocess, "CREATE_NO_WINDOW", 0))
+        threading.Thread(target=self._pump_output, args=(self.proc,),
+                         daemon=True).start()
+
+    def _pump_output(self, proc):
+        """transcribe.py の出力を読む。\\r 更新は進捗ラベルに回す."""
+        buf = b""
+        while True:
+            ch = proc.stdout.read(1)
+            if not ch:
+                break
+            if ch in b"\r\n":
+                line = buf.decode("utf-8", "replace").rstrip()
+                buf = b""
+                if line.strip():
+                    self.msg_queue.put(
+                        ("progress" if ch == b"\r" else "log", line))
+            else:
+                buf += ch
+        if buf.strip():
+            self.msg_queue.put(("log", buf.decode("utf-8", "replace")))
+        proc.wait()
+        self.msg_queue.put(("transcribe_done", proc.returncode))
+
+    def _on_transcribe_done(self, code):
+        self.proc = None
+        self.lbl_progress.configure(text="")
+        self.btn_transcribe.configure(state="normal")
+        self.btn_record.configure(state="normal")
+        if code == 0:
+            self.log("完了しました。transcript.txt を確認してください。")
+            self.log("")
+        else:
+            self.log(f"エラーで終了しました (code {code})")
+            messagebox.showerror("文字起こし失敗",
+                                 "ログを確認してください。\n"
+                                 "モデル未取得の場合は setup.bat を実行してください。")
+
+    # ------------------------------------------------------------------ 受信
+    def _drain_queue(self):
+        try:
+            while True:
+                kind, payload = self.msg_queue.get_nowait()
+                if kind == "log":
+                    self.log(payload)
+                elif kind == "progress":
+                    self.lbl_progress.configure(text=payload.strip())
+                elif kind == "record_done":
+                    self._on_record_done(payload)
+                elif kind == "transcribe_done":
+                    self._on_transcribe_done(payload)
+        except queue.Empty:
+            pass
+        self.after(100, self._drain_queue)
+
+    def on_close(self):
+        if self.session is not None:
+            if not messagebox.askokcancel("録音中", "録音を停止して終了しますか?"):
+                return
+            try:
+                self.session.stop()
+                self.session.close()
+            except Exception:
+                pass
+        if self.proc is not None:
+            if not messagebox.askokcancel("実行中", "文字起こしを中断して終了しますか?"):
+                return
+            self.proc.terminate()
+        self.master.destroy()
+
+
+def main():
+    # pythonw.exe は例外を画面にもコンソールにも出さず黙って終了するため、
+    # 落ちた理由が必ず残るようにログへ書き出す。
+    import traceback
+
+    log_path = ROOT / "gui_error.log"
+    try:
+        root = tk.Tk()
+        root.title("会議録音・文字起こし (ローカル完結)")
+        root.geometry("680x720")
+        root.minsize(650, 690)
+        app = App(root)
+        root.protocol("WM_DELETE_WINDOW", app.on_close)
+        root.mainloop()
+        return 0
+    except Exception:
+        detail = traceback.format_exc()
+        try:
+            log_path.write_text(detail, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            messagebox.showerror(
+                "起動に失敗しました",
+                f"{detail.strip().splitlines()[-1]}\n\n詳細: {log_path}")
+        except Exception:
+            pass
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
