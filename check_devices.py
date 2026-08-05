@@ -17,6 +17,10 @@ def fmt(info, mark=""):
 
 
 def main():
+    # デバイス名に (R) などの記号が入ることがあり、cp932 のままだと落ちる
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     p = pyaudio.PyAudio()
     try:
         try:

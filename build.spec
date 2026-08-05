@@ -21,7 +21,7 @@ for pkg in ("ctranslate2", "onnxruntime", "sherpa_onnx", "av", "pyaudiowpatch",
 datas += collect_data_files("faster_whisper")
 
 hiddenimports += ["faster_whisper", "diarization", "transcribe", "record",
-                  "check_devices", "download_models", "gui", "apppaths"]
+                  "check_devices", "download_models", "gui", "apppaths", "config"]
 
 a = Analysis(
     ["app.py"],
