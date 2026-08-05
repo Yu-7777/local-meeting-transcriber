@@ -3,7 +3,7 @@
 ## ビルド
 
 ```
-.venv\Scripts\python.exe -m pip install pyinstaller
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .venv\Scripts\python.exe -m PyInstaller build.spec --noconfirm
 ```
 

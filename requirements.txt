@@ -1,9 +1,44 @@
-PyAudioWPatch==0.2.12.8
-faster-whisper==1.2.1
-# sherpa-onnx 1.13.4 の DLL もスマート アプリ コントロールに恒久的に
-# ブロックされたため 1.13.2 に固定している
-sherpa-onnx==1.13.2
-numpy
-# av 18.0.0 の input.pyd がスマート アプリ コントロールに恒久的にブロック
-# される事例があったため 17.0.0 に固定している（17 系は問題なく動作する）
-av==17.0.0
+# このツールが動くことを実機で確認した組み合わせ。推移的な依存まで含めて
+# すべて固定してある。
+#
+# なぜ全部固定するのか:
+#   スマート アプリ コントロール (SAC) は、署名のないバイナリを
+#   Microsoft のクラウド評価だけで判定する。評価が付いていない
+#   「出たばかりのバージョン」は問答無用でブロックされる。実際に
+#   av 18.0.0 と sherpa-onnx 1.13.4 がこれで動かなくなった。
+#   固定しないと、セットアップした日によって当たり外れが出る。
+#
+# 更新する時は、SAC が有効な Windows 11 で実際に録音と文字起こしを
+# 通してから上げること。
+
+# --- 直接使うもの ---
+PyAudioWPatch==0.2.12.8   # WASAPI ループバック録音
+faster-whisper==1.2.1     # 文字起こし (CTranslate2)
+sherpa-onnx==1.13.2       # 話者分離。1.13.4 は SAC にブロックされた
+av==17.0.0                # 音声デコード。18.0.0 は SAC にブロックされた
+numpy==2.5.1
+
+# --- 上記が引き連れてくるもの ---
+anyio==4.14.2
+certifi==2026.7.22
+click==8.4.2
+colorama==0.4.6
+ctranslate2==4.8.1
+filelock==3.32.2
+flatbuffers==25.12.19
+fsspec==2026.7.0
+h11==0.16.0
+hf-xet==1.5.2
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==1.26.0
+idna==3.18
+onnxruntime==1.28.0
+packaging==26.2
+protobuf==7.35.1
+PyYAML==6.0.3
+setuptools==83.0.0
+sherpa-onnx-core==1.13.2
+tokenizers==0.23.1
+tqdm==4.70.0
+typing_extensions==4.16.0

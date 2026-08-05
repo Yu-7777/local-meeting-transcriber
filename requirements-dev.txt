@@ -1,0 +1,10 @@
+# 開発時だけ使うもの。利用者のセットアップ (setup.bat) では入れない。
+#
+#   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+pyflakes==3.4.0           # 未使用 import などの検査
+pyinstaller==6.21.0       # exe のビルド (BUILD.md 参照)
+pyinstaller-hooks-contrib==2026.6
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
