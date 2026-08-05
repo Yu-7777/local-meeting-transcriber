@@ -14,7 +14,7 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import pyaudiowpatch as pyaudio
 
@@ -110,8 +110,15 @@ class App(ttk.Frame):
         ttk.Button(box, text="変更", width=6, command=self.choose_savedir).grid(
             row=2, column=2, padx=2, pady=(6, 2))
 
+        ttk.Label(box, text="名前 (任意):").grid(row=3, column=0, sticky="w", pady=2)
+        self.var_recname = tk.StringVar()
+        ttk.Entry(box, textvariable=self.var_recname).grid(
+            row=3, column=1, sticky="ew", padx=(6, 4), pady=2)
+        ttk.Label(box, text="例: 定例MTG", foreground="gray").grid(
+            row=3, column=2, sticky="w", padx=2)
+
         ctrl = ttk.Frame(box)
-        ctrl.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 2))
+        ctrl.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 2))
         ctrl.columnconfigure(2, weight=1)
 
         self.btn_record = ttk.Button(ctrl, text="● 録音開始", width=14,
@@ -124,7 +131,7 @@ class App(ttk.Frame):
         self.lbl_state.grid(row=0, column=2, sticky="w")
 
         meters = ttk.Frame(box)
-        meters.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        meters.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         meters.columnconfigure(1, weight=1)
         self.meters = {}
         for i, label in enumerate(("相手", "自分")):
@@ -145,8 +152,12 @@ class App(ttk.Frame):
         self.cb_rec = ttk.Combobox(box, state="readonly", width=46)
         self.cb_rec.grid(row=0, column=1, sticky="ew", padx=(6, 4), pady=2)
         self.cb_rec.bind("<<ComboboxSelected>>", lambda e: self._clear_picked())
-        ttk.Button(box, text="更新", width=6, command=self.refresh_recordings).grid(
-            row=0, column=2, padx=2)
+        recbtn = ttk.Frame(box)
+        recbtn.grid(row=0, column=2, padx=2, pady=2)
+        ttk.Button(recbtn, text="更新", width=5,
+                   command=self.refresh_recordings).grid(row=0, column=0)
+        ttk.Button(recbtn, text="改名", width=5, command=self.rename_recording).grid(
+            row=0, column=1, padx=(2, 0))
 
         pick = ttk.Frame(box)
         pick.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 4))
@@ -278,6 +289,32 @@ class App(ttk.Frame):
         self.lbl_picked.configure(text=self.picked_file.name)
         self.log(f"対象ファイル: {f}")
 
+    def rename_recording(self):
+        """選択中の録音の名前部分だけを付け替える（日時は変えない）."""
+        idx = self.cb_rec.current()
+        if idx < 0 or not getattr(self, "_recordings", []):
+            messagebox.showinfo("対象がありません", "改名する録音を選んでください。")
+            return
+        target = self._recordings[idx]
+        _, current = record.split_recording_name(target.name)
+        new = simpledialog.askstring(
+            "録音の名前",
+            f"{target.name}\n\n名前を入力してください（空にすると日時だけに戻ります）",
+            initialvalue=current, parent=self)
+        if new is None:
+            return
+        try:
+            renamed = record.rename_recording(target, new)
+        except OSError as exc:
+            messagebox.showerror(
+                "改名できません",
+                f"{exc}\n\n録音の音声ファイルを開いているアプリがあれば閉じてください。")
+            return
+        self.log(f"改名しました: {target.name} -> {renamed.name}")
+        self.refresh_recordings()
+        if renamed.name in self.cb_rec["values"]:
+            self.cb_rec.current(list(self.cb_rec["values"]).index(renamed.name))
+
     def _clear_picked(self):
         """録音一覧を選び直したら、単体ファイル指定は解除する."""
         if self.picked_file is not None:
@@ -321,7 +358,8 @@ class App(ttk.Frame):
             return
 
         try:
-            self.session = record.RecordingSession(mic_index=mic, loopback_index=lb)
+            self.session = record.RecordingSession(
+                mic_index=mic, loopback_index=lb, name=self.var_recname.get())
             self.session.start()
         except SystemExit as exc:
             self.session = None
@@ -384,6 +422,8 @@ class App(ttk.Frame):
         self.btn_record.configure(state="normal")
         self.btn_transcribe.configure(state="normal")
         self.lbl_state.configure(text="待機中", foreground="gray")
+        # 名前は消しておく。次の録音に前回の名前が残るほうが事故になりやすい
+        self.var_recname.set("")
         for pb, db in self.meters.values():
             pb["value"] = 0
             db.configure(text="  -- dB")

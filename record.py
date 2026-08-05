@@ -12,6 +12,7 @@ import argparse
 import datetime as dt
 import json
 import queue
+import re
 import sys
 import threading
 import time
@@ -26,7 +27,74 @@ SAMPLE_WIDTH = 2  # paInt16
 START_TIMEOUT = 10.0  # 全ストリームが動き出すのを待つ上限(秒)
 GAP_TOLERANCE = 0.15  # これを超える時間軸のズレを無音で埋める(秒)
 
+# 録音フォルダは「日時[_名前]」。日時が先頭なのは、名前順に並べた時に
+# 時系列順になるため。秒は入れない（読みにくいわりに区別に使わない）。
+STAMP_FORMAT = "%Y_%m_%d_%H_%M"
+# 上の形式と、旧形式 (20260802_174653) の両方を日時として認識する
+STAMP_RE = re.compile(r"^(\d{4}_\d{2}_\d{2}_\d{2}_\d{2}|\d{8}_\d{6})(?:_(.*))?$")
+# Windows のファイル名に使えない文字（: はドライブ区切りのため使えない）
+INVALID_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+MAX_NAME_LEN = 40
+
 import config  # noqa: E402
+
+
+def sanitize_name(name):
+    """録音名をフォルダ名に使える形に整える。使えない場合は空文字を返す."""
+    cleaned = INVALID_CHARS.sub("_", str(name or "")).strip()
+    # 末尾のドットと空白は Windows が黙って落とすので、こちらで取り除く
+    return cleaned[:MAX_NAME_LEN].strip(". ")
+
+
+def split_recording_name(folder_name):
+    """フォルダ名を (日時部分, 名前部分) に分ける.
+
+    日時として読めない場合は、全体を日時部分として扱う（改名しても
+    元の名前を失わないようにするため）。
+    """
+    m = STAMP_RE.match(folder_name)
+    if m:
+        return m.group(1), m.group(2) or ""
+    return folder_name, ""
+
+
+def _unique_dir(parent, stem, exclude=None):
+    """parent/stem が既にあれば連番を足して、空いている名前を返す."""
+    candidate = parent / stem
+    n = 2
+    while candidate.exists() and candidate != exclude:
+        candidate = parent / f"{stem}_{n}"
+        n += 1
+    return candidate
+
+
+def new_recording_dir(base, name="", now=None):
+    """次の録音を入れるフォルダのパスを決める（作成はしない）.
+
+    秒を持たないため、同じ分に録り直すと同名になる。既存の録音を
+    上書きしないよう、その場合は連番を足す。
+    """
+    stem = (now or dt.datetime.now()).strftime(STAMP_FORMAT)
+    label = sanitize_name(name)
+    if label:
+        stem = f"{stem}_{label}"
+    return _unique_dir(Path(base), stem)
+
+
+def rename_recording(path, name):
+    """録音フォルダの名前部分だけを付け替える。新しいパスを返す.
+
+    日時部分は変えない（時系列の並びを壊さないため）。name が空なら
+    名前を外して日時だけに戻す。
+    """
+    path = Path(path)
+    stamp, _ = split_recording_name(path.name)
+    label = sanitize_name(name)
+    stem = f"{stamp}_{label}" if label else stamp
+    target = _unique_dir(path.parent, stem, exclude=path)
+    if target != path:
+        path.rename(target)
+    return target
 
 
 class StreamRecorder:
@@ -219,10 +287,9 @@ class RecordingSession:
     CLI (record.py) と GUI (gui.py) の双方から使う。同期処理を二重に持たないため。
     """
 
-    def __init__(self, mic_index=None, loopback_index=None, outdir=None):
-        self.outdir = Path(outdir) if outdir else (
-            config.recordings_dir() / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        )
+    def __init__(self, mic_index=None, loopback_index=None, outdir=None, name=""):
+        self.outdir = Path(outdir) if outdir else new_recording_dir(
+            config.recordings_dir(), name)
         self._mic_index = mic_index
         self._loopback_index = loopback_index
         self._barrier = threading.Event()
@@ -346,13 +413,15 @@ def main():
     ap.add_argument("--mic", type=int, default=None, help="マイクのデバイス index")
     ap.add_argument("--loopback", type=int, default=None, help="ループバックの device index")
     ap.add_argument("--outdir", type=Path, default=None, help="出力先ディレクトリ")
+    ap.add_argument("--name", default="",
+                    help="録音の名前。フォルダ名が 日時_名前 になる（任意）")
     ap.add_argument("--seconds", type=float, default=None, help="指定秒数で自動停止")
     args = ap.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    session = RecordingSession(args.mic, args.loopback, args.outdir)
+    session = RecordingSession(args.mic, args.loopback, args.outdir, args.name)
     recorders = []
     try:
         session.start()
