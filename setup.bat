@@ -93,8 +93,8 @@ echo ============================================================
 echo   Setup complete
 echo ============================================================
 echo.
-echo   Use the desktop shortcut, or press the Windows key and type
-echo   the tool name. Double-clicking gui.bat also works.
+echo   To start: press the Windows key and type the tool name.
+echo   Double-clicking gui.bat also works.
 echo.
 echo   Command line:
 echo     .venv\Scripts\python.exe check_devices.py
