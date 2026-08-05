@@ -97,6 +97,56 @@ def rename_recording(path, name):
     return target
 
 
+def recording_size(path):
+    """録音フォルダの合計バイト数を返す."""
+    return sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file())
+
+
+def move_to_trash(path):
+    """フォルダをごみ箱へ移す.
+
+    完全削除ではなくごみ箱にするのは、置き換える対象がエクスプローラーでの
+    削除であり、そちらと同じ挙動にするのが最も驚きが少ないため。会議の録音は
+    取り直しがきかないので、誤操作から戻せることも重要。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    FO_DELETE = 0x0003
+    FOF_SILENT = 0x0004
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_ALLOWUNDO = 0x0040  # これがごみ箱行きにするフラグ
+    FOF_NOERRORUI = 0x0400
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint16),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    path = Path(path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    op = SHFILEOPSTRUCTW()
+    op.wFunc = FO_DELETE
+    # pFrom は「NUL 区切り + 末尾に NUL がもう 1 つ」という形式
+    op.pFrom = str(path) + "\0\0"
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if result != 0:
+        raise OSError(f"ごみ箱へ移せませんでした (コード {result}): {path}")
+    if op.fAnyOperationsAborted:
+        raise OSError(f"削除が中断されました: {path}")
+
+
 class StreamRecorder:
     """1 本の入力ストリームを WAV に書き出す.
 

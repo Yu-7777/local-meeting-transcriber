@@ -130,8 +130,13 @@ class App(ttk.Frame):
         self.lbl_state = ttk.Label(ctrl, text="待機中", foreground="gray")
         self.lbl_state.grid(row=0, column=2, sticky="w")
 
+        self.var_auto = tk.BooleanVar(value=config.load()["auto_transcribe"])
+        ttk.Checkbutton(box, text="録音を停止したら、そのまま文字起こしを開始する",
+                        variable=self.var_auto, command=self._save_auto).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
         meters = ttk.Frame(box)
-        meters.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        meters.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         meters.columnconfigure(1, weight=1)
         self.meters = {}
         for i, label in enumerate(("相手", "自分")):
@@ -158,6 +163,8 @@ class App(ttk.Frame):
                    command=self.refresh_recordings).grid(row=0, column=0)
         ttk.Button(recbtn, text="改名", width=5, command=self.rename_recording).grid(
             row=0, column=1, padx=(2, 0))
+        ttk.Button(recbtn, text="削除", width=5, command=self.delete_recording).grid(
+            row=0, column=2, padx=(2, 0))
 
         pick = ttk.Frame(box)
         pick.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 4))
@@ -295,11 +302,11 @@ class App(ttk.Frame):
 
     def rename_recording(self):
         """選択中の録音の名前部分だけを付け替える（日時は変えない）."""
-        idx = self.cb_rec.current()
-        if idx < 0 or not getattr(self, "_recordings", []):
-            messagebox.showinfo("対象がありません", "改名する録音を選んでください。")
+        if self.delete_terminal_busy():
             return
-        target = self._recordings[idx]
+        target = self._selected_recording("改名")
+        if target is None:
+            return
         _, current = record.split_recording_name(target.name)
         new = simpledialog.askstring(
             "録音の名前",
@@ -318,6 +325,55 @@ class App(ttk.Frame):
         self.refresh_recordings()
         if renamed.name in self.cb_rec["values"]:
             self.cb_rec.current(list(self.cb_rec["values"]).index(renamed.name))
+
+    def _selected_recording(self, action):
+        """一覧で選択中の録音を返す。選べていなければ案内して None."""
+        idx = self.cb_rec.current()
+        if idx < 0 or not getattr(self, "_recordings", []):
+            messagebox.showinfo("対象がありません",
+                                f"{action}する録音を選んでください。")
+            return None
+        return self._recordings[idx]
+
+    def delete_terminal_busy(self):
+        """録音中・文字起こし中は録音フォルダを触らせない."""
+        if self.session is not None:
+            messagebox.showwarning("録音中", "先に録音を停止してください。")
+            return True
+        if self.proc is not None:
+            messagebox.showwarning("実行中", "文字起こしの完了を待ってください。")
+            return True
+        return False
+
+    def delete_recording(self):
+        """選択中の録音をごみ箱へ移す（完全削除はしない）."""
+        if self.delete_terminal_busy():
+            return
+        target = self._selected_recording("削除")
+        if target is None:
+            return
+
+        size_mb = record.recording_size(target) / (1024 * 1024)
+        transcripts = sorted(p.name for p in target.glob("*transcript.txt"))
+        detail = f"{target.name}\n\n  サイズ: {size_mb:,.0f} MB\n"
+        if transcripts:
+            detail += f"  文字起こし: {', '.join(transcripts)} も一緒に消えます\n"
+        detail += "\nごみ箱に移動します（元に戻せます）。よろしいですか?"
+
+        if not messagebox.askokcancel("録音の削除", detail, icon="warning"):
+            return
+        try:
+            record.move_to_trash(target)
+        except OSError as exc:
+            messagebox.showerror(
+                "削除できません",
+                f"{exc}\n\n音声ファイルを開いているアプリがあれば閉じてください。")
+            return
+        self.log(f"ごみ箱へ移動しました: {target.name} ({size_mb:,.0f} MB)")
+        self.refresh_recordings()
+
+    def _save_auto(self):
+        config.save(auto_transcribe=self.var_auto.get())
 
     def _clear_picked(self):
         """録音一覧を選び直したら、単体ファイル指定は解除する."""
@@ -453,21 +509,32 @@ class App(ttk.Frame):
             db.configure(text="  -- dB")
         self.refresh_recordings()
 
+        if self.var_auto.get():
+            self.log("続けて文字起こしを開始します。")
+            self._clear_picked()  # 単体ファイル指定が残っていても録音を優先する
+            self.start_transcribe(outdir)
+
     # ---------------------------------------------------------- 文字起こし制御
-    def start_transcribe(self):
+    def start_transcribe(self, target=None):
+        """文字起こしを開始する。target 省略時は画面の選択に従う.
+
+        録音停止直後の自動実行では、一覧の更新を待たずに済むよう、
+        録音先を直接渡す。
+        """
         if self.session is not None:
             messagebox.showwarning("録音中", "先に録音を停止してください。")
             return
-        if self.picked_file is not None:
-            target = self.picked_file
-        else:
-            idx = self.cb_rec.current()
-            if idx < 0 or not getattr(self, "_recordings", []):
-                messagebox.showinfo(
-                    "対象がありません",
-                    "先に録音するか、「音声ファイルを選ぶ...」で指定してください。")
-                return
-            target = self._recordings[idx]
+        if target is None:
+            if self.picked_file is not None:
+                target = self.picked_file
+            else:
+                idx = self.cb_rec.current()
+                if idx < 0 or not getattr(self, "_recordings", []):
+                    messagebox.showinfo(
+                        "対象がありません",
+                        "先に録音するか、「音声ファイルを選ぶ...」で指定してください。")
+                    return
+                target = self._recordings[idx]
 
         if not self._confirm_model_download(self.cb_model.get()):
             return
@@ -572,8 +639,8 @@ def main():
     try:
         root = tk.Tk()
         root.title("会議録音・文字起こし (ローカル完結)")
-        root.geometry("700x760")
-        root.minsize(670, 730)
+        root.geometry("720x800")
+        root.minsize(690, 770)
         app = App(root)
         root.protocol("WM_DELETE_WINDOW", app.on_close)
         root.mainloop()

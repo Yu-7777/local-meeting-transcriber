@@ -19,6 +19,8 @@ DEFAULTS = {
     "transcripts_dir": "",
     "model": "large-v3-turbo",
     "threads": 4,
+    # 録音を停止したら、そのまま文字起こしまで走らせるか
+    "auto_transcribe": False,
 }
 
 
