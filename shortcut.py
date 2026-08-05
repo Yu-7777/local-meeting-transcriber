@@ -1,6 +1,10 @@
-"""デスクトップとスタートメニューにショートカットを作る.
+"""スタートメニュー（と、希望すればデスクトップ）にショートカットを作る.
 
 毎回 gui.bat を探しに行くのは手間なので、セットアップの最後に作る。
+既定でスタートメニューだけにするのは、普通のアプリが必ず登録する場所で
+誰の邪魔にもならないため。デスクトップにアイコンが並ぶのを嫌う人がいるので、
+そちらは明示的に希望した時だけ作る。
+
 リンク先は pythonw.exe を直接指すため、起動時にコンソールが一瞬も出ない
 （gui.bat 経由だと黒い窓が一瞬光る）。
 
@@ -8,6 +12,7 @@
 依存が増え、スマート アプリ コントロールに引っかかる面が増えるため。
 """
 
+import argparse
 import subprocess
 import sys
 import tempfile
@@ -28,7 +33,7 @@ $icon    = {icon}
 
 $shell = New-Object -ComObject WScript.Shell
 $made = @()
-foreach ($folder in @('Desktop', 'Programs')) {{
+foreach ($folder in @({folders})) {{
     $dir = [Environment]::GetFolderPath($folder)
     if (-not $dir -or -not (Test-Path $dir)) {{ continue }}
     $path = Join-Path $dir '{name}.lnk'
@@ -59,16 +64,21 @@ def targets():
     return pythonw, str(ROOT / "gui.py"), ROOT, pythonw
 
 
-def create():
-    """ショートカットを作り、作成したパスのリストを返す."""
+def create(desktop=False):
+    """ショートカットを作り、作成したパスのリストを返す.
+
+    スタートメニューには必ず作る。デスクトップは desktop=True の時だけ。
+    """
     target, args, workdir, icon = targets()
     if not Path(target).exists():
         raise SystemExit(
             f"{target} が見つかりません。先に setup.bat を実行してください。")
 
+    folders = ["'Programs'"] + (["'Desktop'"] if desktop else [])
     script = PS_TEMPLATE.format(
         target=_quote(target), args=_quote(args),
         workdir=_quote(workdir), icon=_quote(icon), name=NAME,
+        folders=", ".join(folders),
     )
     # -Command に日本語を渡すと環境によって化けるので、UTF-8 BOM 付きの
     # ファイルにして -File で渡す
@@ -92,10 +102,15 @@ def create():
 
 
 def main():
+    ap = argparse.ArgumentParser(description="起動用のショートカットを作る")
+    ap.add_argument("--desktop", action="store_true",
+                    help="デスクトップにも作る（既定はスタートメニューのみ）")
+    args = ap.parse_args()
+
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
-        made = create()
+        made = create(desktop=args.desktop)
     except SystemExit as exc:
         print(f"  ※ {exc}")
         return 0  # ショートカットが作れなくてもセットアップは成功扱いにする

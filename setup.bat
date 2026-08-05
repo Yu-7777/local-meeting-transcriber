@@ -72,11 +72,21 @@ if errorlevel 1 (
     if errorlevel 1 goto :fail
 )
 
-rem Looking for gui.bat every time is a hassle, so put a shortcut on the
-rem desktop and in the Start menu. Failing here does not fail the setup.
+rem Looking for gui.bat every time is a hassle, so register it in the Start
+rem menu (press the Windows key and type to find it). A desktop icon is a
+rem matter of taste, so ask instead of forcing one. /t 15 /d N keeps this
+rem from hanging when setup runs unattended. Failing here does not fail setup.
 echo.
-echo Creating shortcuts...
+echo Adding to the Start menu...
 ".venv\Scripts\python.exe" "shortcut.py"
+
+echo.
+choice /c YN /n /t 15 /d N /m "Put a shortcut on the desktop too? [Y/N] (No in 15s) "
+if errorlevel 2 (
+    echo   Start menu only. Run "shortcut.py --desktop" later if you change your mind.
+) else (
+    ".venv\Scripts\python.exe" "shortcut.py" --desktop
+)
 
 echo.
 echo ============================================================
