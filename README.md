@@ -67,7 +67,16 @@ GUI では未取得のモデルを選ぶと注記が出て、実行前に確認�
 
 ## 使い方（GUI）
 
-**`gui.bat` をダブルクリック**すれば、あとは画面上で完結します。
+セットアップ時に**デスクトップとスタートメニューにショートカット**
+（`会議録音・文字起こし`）が作られます。そこから起動すれば、あとは画面上で
+完結します。Windows キーを押して「会議」と打っても出てきます。
+
+`gui.bat` のダブルクリックでも同じです。ショートカットを消してしまった場合や、
+フォルダを移動した場合は、次で作り直せます。
+
+```
+.venv\Scripts\python.exe shortcut.py
+```
 
 ```
 ┌─ 録音 ────────────────────────────────┐
@@ -391,6 +400,7 @@ transcribe.py      文字起こし → transcript.txt
 diarization.py     相手チャンネルの話者分離 (sherpa-onnx / --diarize 時のみ)
 check_devices.py   WASAPI デバイス一覧
 download_models.py モデル事前取得
+shortcut.py        デスクトップ / スタートメニューのショートカット作成
 setup.bat          初期セットアップ
 record.bat         録音のショートカット
 models/            Whisper モデル（初回取得後はオフラインで動作）

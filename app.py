@@ -5,6 +5,7 @@
     app.exe record             -> 録音 (CLI)
     app.exe devices            -> デバイス一覧
     app.exe download --all     -> モデル取得
+    app.exe shortcut           -> ショートカット作成
 
 exe 化すると python.exe が無くなるため、GUI からの文字起こし呼び出しも
 この振り分けを経由して自分自身を起動する。
@@ -17,7 +18,7 @@ def main():
     argv = sys.argv[1:]
     cmd = argv[0] if argv else None
 
-    if cmd in ("transcribe", "record", "devices", "download"):
+    if cmd in ("transcribe", "record", "devices", "download", "shortcut"):
         sys.argv = [sys.argv[0]] + argv[1:]
         if cmd == "transcribe":
             import transcribe
@@ -28,6 +29,9 @@ def main():
         if cmd == "devices":
             import check_devices
             return check_devices.main()
+        if cmd == "shortcut":
+            import shortcut
+            return shortcut.main()
         import download_models
         return download_models.main()
 

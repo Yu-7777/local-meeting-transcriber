@@ -72,12 +72,19 @@ if errorlevel 1 (
     if errorlevel 1 goto :fail
 )
 
+rem Looking for gui.bat every time is a hassle, so put a shortcut on the
+rem desktop and in the Start menu. Failing here does not fail the setup.
+echo.
+echo Creating shortcuts...
+".venv\Scripts\python.exe" "shortcut.py"
+
 echo.
 echo ============================================================
 echo   Setup complete
 echo ============================================================
 echo.
-echo   Double-click gui.bat to record and transcribe.
+echo   Use the desktop shortcut, or press the Windows key and type
+echo   the tool name. Double-clicking gui.bat also works.
 echo.
 echo   Command line:
 echo     .venv\Scripts\python.exe check_devices.py
