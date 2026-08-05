@@ -147,10 +147,7 @@ GUI では「音声ファイルを選ぶ...」ボタンから同じことがで�
 | `--diarize` | off | 相手側を声質で話者ごとに分ける（相手が複数人の時） |
 | `--speakers` | 自動 | 相手側の人数。指定すると分離精度が上がる |
 
-出力:
-
-- `transcript.txt` — 話者ラベル付きの時系列トランスクリプト
-- `segments.json` — 開始・終了時刻や確信度を含む生データ
+出力は `transcript.txt` の 1 ファイルだけです。
 
 ```
 [00:00:03] 相手: 本日はお時間いただきありがとうございます。
@@ -306,7 +303,7 @@ large-v3 が約 1.1 倍速でした。2 本のファイルを順に処理する�
 ```
 gui.py / gui.bat   簡易 GUI（録音と文字起こしの実行のみ。結果はファイル出力）
 record.py          2 ストリーム同時録音 → system.wav / mic.wav / meta.json
-transcribe.py      文字起こし → transcript.txt / segments.json
+transcribe.py      文字起こし → transcript.txt
 diarization.py     相手チャンネルの話者分離 (sherpa-onnx / --diarize 時のみ)
 check_devices.py   WASAPI デバイス一覧
 download_models.py モデル事前取得

@@ -179,10 +179,8 @@ def transcribe_stream(model, wav_path, label, offset, language, beam_size):
         results.append({
             "speaker": label,
             "start": seg.start + offset,
-            "end": seg.end + offset,
+            "end": seg.end + offset,  # 話者分離の区間との重なり判定に使う
             "text": text,
-            "no_speech_prob": round(seg.no_speech_prob, 4),
-            "avg_logprob": round(seg.avg_logprob, 4),
         })
 
     elapsed = time.perf_counter() - started
@@ -269,7 +267,6 @@ def main():
                     order[spk] = len(order) + 1
             for s, spk in zip(segs, raw):
                 if spk is not None:
-                    s["speaker_id"] = order[spk]
                     s["speaker"] = (f"{label}(話者{order[spk]})" if label
                                     else f"話者{order[spk]}")
             if order:
@@ -280,10 +277,6 @@ def main():
     all_segments.sort(key=lambda s: s["start"])
 
     prefix = f"{stem}_" if stem else ""
-    (out_dir / f"{prefix}segments.json").write_text(
-        json.dumps(all_segments, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
     lines = ["# 会議文字起こし"]
     if meta.get("single_file"):
         lines.append(f"# 元ファイル : {items[0][0].name}")
