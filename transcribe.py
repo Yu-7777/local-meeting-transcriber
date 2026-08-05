@@ -229,6 +229,22 @@ def main():
     print(f"  モデル : {model_name} (CPU / int8 / {threads} threads)")
     print("=" * 68)
 
+    import download_models
+
+    # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし始めると
+    # 固まったように見えるので、何が起きるか先に伝える。
+    if not download_models.is_downloaded(model_name):
+        gb = download_models.MODEL_SIZES.get(model_name)
+        size = f"約 {gb} GB" if gb else "数 GB"
+        if args.offline:
+            raise SystemExit(
+                f"\n{model_name} はまだ取得していません（{size}）。\n"
+                "--offline を外して実行するか、先に次を実行してください:\n"
+                f"  .venv\\Scripts\\python.exe download_models.py {model_name}"
+            )
+        print(f"\n※ {model_name} は初回のため {size} をダウンロードします。")
+        print("  回線によっては数分〜数十分かかります。次回からは不要です。")
+
     from faster_whisper import WhisperModel
 
     print("\nモデルを読み込んでいます...")

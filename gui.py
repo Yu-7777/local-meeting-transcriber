@@ -184,6 +184,10 @@ class App(ttk.Frame):
         saved_model = config.load()["model"]
         self.cb_model.current(MODELS.index(saved_model) if saved_model in MODELS else 0)
         self.cb_model.grid(row=3, column=1, sticky="w", padx=(6, 4), pady=2)
+        self.cb_model.bind("<<ComboboxSelected>>", lambda e: self._update_model_note())
+        self.lbl_model = ttk.Label(box, text="", foreground="#a60")
+        self.lbl_model.grid(row=3, column=1, sticky="e", padx=(0, 4))
+        self._update_model_note()
 
         opt = ttk.Frame(box)
         opt.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 2))
@@ -321,6 +325,26 @@ class App(ttk.Frame):
             self.picked_file = None
             self.lbl_picked.configure(text="")
 
+    def _update_model_note(self):
+        """未取得のモデルを選んだ時に、ダウンロードが要ることを見せる."""
+        import download_models
+
+        self.lbl_model.configure(text=download_models.size_note(self.cb_model.get()))
+
+    def _confirm_model_download(self, name):
+        """未取得のモデルなら、数GB落とすことを確認する。続けるなら True."""
+        import download_models
+
+        if download_models.is_downloaded(name):
+            return True
+        gb = download_models.MODEL_SIZES.get(name, "?")
+        return messagebox.askokcancel(
+            "モデルのダウンロード",
+            f"{name} はまだ取得していません。\n\n"
+            f"初回のみ約 {gb} GB のダウンロードが発生します"
+            "（回線によっては数分〜数十分）。\n"
+            "次回からは不要です。\n\n続けますか?")
+
     def _toggle_speakers(self):
         self.cb_speakers.configure(
             state="readonly" if self.var_diarize.get() else "disabled")
@@ -445,6 +469,9 @@ class App(ttk.Frame):
                 return
             target = self._recordings[idx]
 
+        if not self._confirm_model_download(self.cb_model.get()):
+            return
+
         config.save(model=self.cb_model.get())
         cmd = child_command("transcribe", target,
                             "--model", self.cb_model.get(), "--threads", "4")
@@ -493,6 +520,7 @@ class App(ttk.Frame):
         self.lbl_progress.configure(text="")
         self.btn_transcribe.configure(state="normal")
         self.btn_record.configure(state="normal")
+        self._update_model_note()  # 取得できていれば案内を消す
         if code == 0:
             self.log("完了しました。「出力先を開く」で結果を確認できます。")
             self.log("")

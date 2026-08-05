@@ -57,15 +57,18 @@ echo [3/4] Installing dependencies...
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
 
+rem Only the default model is fetched here. The higher accuracy model
+rem (large-v3, 2.9 GB) is downloaded on demand the first time it is picked,
+rem so first-time setup stays at about 1.6 GB instead of 4.6 GB.
 echo.
-echo [4/4] Downloading speech models (about 4.6 GB, this takes a while)...
-".venv\Scripts\python.exe" "download_models.py" --all
+echo [4/4] Downloading the speech model (about 1.6 GB, this takes a while)...
+".venv\Scripts\python.exe" "download_models.py" large-v3-turbo --diarization
 if errorlevel 1 (
     echo.
     echo First attempt failed. This is often a temporary block by
     echo Smart App Control. Retrying once...
     echo.
-    ".venv\Scripts\python.exe" "download_models.py" --all
+    ".venv\Scripts\python.exe" "download_models.py" large-v3-turbo --diarization
     if errorlevel 1 goto :fail
 )
 
