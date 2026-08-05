@@ -1,0 +1,7 @@
+# cmd.exe は本来 CRLF を前提にしており、LF だけの .bat は goto や
+# 括弧ブロックの解釈が環境によって壊れることがある。配布物なので、
+# どの環境で clone / ZIP 展開しても CRLF になるよう固定する。
+*.bat text eol=crlf
+
+# 残りは触らない（Python は LF/CRLF どちらでも動くため）
+* -text
