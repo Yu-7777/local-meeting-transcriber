@@ -46,6 +46,14 @@ def latest_recording(base=None):
     return max(dirs, key=lambda d: d.stat().st_mtime)
 
 
+def resolve_outdir(explicit, fallback):
+    """出力先を決める。明示指定 > 設定値 > 入力と同じ場所 の優先順."""
+    if explicit:
+        return Path(explicit)
+    configured = config.transcripts_dir()
+    return configured if configured else Path(fallback)
+
+
 def build_plan(target, outdir=None):
     """入力の指定から (出力先, [(wav, ラベル, 話者分離するか)], meta) を組み立てる.
 
@@ -61,7 +69,7 @@ def build_plan(target, outdir=None):
     if target.is_file():
         if target.suffix.lower() not in AUDIO_SUFFIXES:
             raise SystemExit(f"対応していない形式です: {target.suffix}")
-        out = Path(outdir) if outdir else target.parent
+        out = resolve_outdir(outdir, target.parent)
         out.mkdir(parents=True, exist_ok=True)
         meta = {"started_at": "-", "wall_duration_sec": 0, "single_file": True}
         # 単体ファイルは誰の声か分からないので話者ラベルを付けない
@@ -86,9 +94,13 @@ def build_plan(target, outdir=None):
             continue
         offset = 0.0 if aligned else float(info.get("start_delay_sec", 0.0))
         items.append((wav, info["label"], name == "system", offset))
-    out = Path(outdir) if outdir else target
+
+    out = resolve_outdir(outdir, target)
     out.mkdir(parents=True, exist_ok=True)
-    return out, items, meta, None
+    # 録音フォルダの中に出すなら transcript.txt のままでよい。外に出す場合は
+    # 録音ごとに同名になって上書きしてしまうので、録音フォルダ名を前に付ける。
+    same_place = out.resolve() == target.resolve()
+    return out, items, meta, None if same_place else target.name
 
 
 def assign_speaker_safe(turns, start, end):
@@ -185,7 +197,8 @@ def main():
     ap.add_argument("recording", nargs="?", type=Path, default=None,
                     help="録音フォルダ、または音声ファイル（省略時は最新の録音）")
     ap.add_argument("--outdir", type=Path, default=None,
-                    help="文字起こし結果の出力先（省略時は入力と同じ場所）")
+                    help="文字起こし結果の出力先"
+                         "（省略時は設定値、未設定なら入力と同じ場所）")
     ap.add_argument("--model", default=None,
                     help="モデル名 (large-v3-turbo / large-v3 など)")
     ap.add_argument("--language", default="ja", help="言語コード。auto で自動判定")

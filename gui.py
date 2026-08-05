@@ -156,14 +156,26 @@ class App(ttk.Frame):
         self.lbl_picked.grid(row=0, column=1, sticky="w", padx=8)
         self.picked_file = None
 
-        ttk.Label(box, text="モデル:").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Label(box, text="出力先:").grid(row=2, column=0, sticky="w", pady=2)
+        self.outdir = config.transcripts_dir()
+        self.var_outdir = tk.StringVar(value=self._outdir_text())
+        ttk.Entry(box, textvariable=self.var_outdir, state="readonly").grid(
+            row=2, column=1, sticky="ew", padx=(6, 4), pady=2)
+        outbtn = ttk.Frame(box)
+        outbtn.grid(row=2, column=2, padx=2, pady=2)
+        ttk.Button(outbtn, text="変更", width=5, command=self.choose_outdir).grid(
+            row=0, column=0)
+        ttk.Button(outbtn, text="既定", width=5, command=self.reset_outdir).grid(
+            row=0, column=1, padx=(2, 0))
+
+        ttk.Label(box, text="モデル:").grid(row=3, column=0, sticky="w", pady=2)
         self.cb_model = ttk.Combobox(box, state="readonly", values=MODELS, width=22)
         saved_model = config.load()["model"]
         self.cb_model.current(MODELS.index(saved_model) if saved_model in MODELS else 0)
-        self.cb_model.grid(row=2, column=1, sticky="w", padx=(6, 4), pady=2)
+        self.cb_model.grid(row=3, column=1, sticky="w", padx=(6, 4), pady=2)
 
         opt = ttk.Frame(box)
-        opt.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 2))
+        opt.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 2))
         self.var_diarize = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt, text="相手を話者ごとに分ける", variable=self.var_diarize,
                         command=self._toggle_speakers).grid(row=0, column=0, sticky="w")
@@ -175,11 +187,11 @@ class App(ttk.Frame):
         self.cb_speakers.grid(row=0, column=2, padx=4)
 
         run = ttk.Frame(box)
-        run.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        run.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         self.btn_transcribe = ttk.Button(run, text="文字起こしを実行", width=18,
                                          command=self.start_transcribe)
         self.btn_transcribe.grid(row=0, column=0)
-        ttk.Button(run, text="保存先を開く", width=14, command=self.open_folder).grid(
+        ttk.Button(run, text="出力先を開く", width=14, command=self.open_folder).grid(
             row=0, column=1, padx=8)
 
     def _build_log_box(self):
@@ -236,6 +248,27 @@ class App(ttk.Frame):
         self.log(f"保存先を変更しました: {d}")
         self.refresh_recordings()
 
+    def _outdir_text(self):
+        return str(self.outdir) if self.outdir else "（入力と同じ場所）"
+
+    def choose_outdir(self):
+        d = filedialog.askdirectory(
+            title="文字起こしの出力先を選んでください",
+            initialdir=str(self.outdir) if self.outdir else self.var_savedir.get())
+        if not d:
+            return
+        self.outdir = Path(d)
+        self.var_outdir.set(self._outdir_text())
+        config.save(transcripts_dir=str(self.outdir))
+        self.log(f"出力先を変更しました: {d}")
+
+    def reset_outdir(self):
+        """出力先を「入力と同じ場所」に戻す（録音フォルダ内に出す従来の挙動）."""
+        self.outdir = None
+        self.var_outdir.set(self._outdir_text())
+        config.save(transcripts_dir="")
+        self.log("出力先を入力と同じ場所に戻しました。")
+
     def choose_audio_file(self):
         f = filedialog.askopenfilename(title="文字起こしする音声ファイル",
                                        filetypes=AUDIO_TYPES)
@@ -256,13 +289,16 @@ class App(ttk.Frame):
             state="readonly" if self.var_diarize.get() else "disabled")
 
     def open_folder(self):
-        if self.picked_file is not None:
-            os.startfile(str(self.picked_file.parent))
-            return
-        target = Path(self.var_savedir.get())
-        idx = self.cb_rec.current()
-        if 0 <= idx < len(getattr(self, "_recordings", [])):
-            target = self._recordings[idx]
+        """文字起こしの結果が出る場所を開く."""
+        if self.outdir is not None:
+            target = self.outdir
+        elif self.picked_file is not None:
+            target = self.picked_file.parent
+        else:
+            target = Path(self.var_savedir.get())
+            idx = self.cb_rec.current()
+            if 0 <= idx < len(getattr(self, "_recordings", [])):
+                target = self._recordings[idx]
         target.mkdir(parents=True, exist_ok=True)
         os.startfile(str(target))
 
@@ -372,6 +408,8 @@ class App(ttk.Frame):
         config.save(model=self.cb_model.get())
         cmd = child_command("transcribe", target,
                             "--model", self.cb_model.get(), "--threads", "4")
+        if self.outdir is not None:
+            cmd += ["--outdir", str(self.outdir)]
         if self.var_diarize.get():
             cmd.append("--diarize")
             if self.var_speakers.get() != "自動":
@@ -416,7 +454,7 @@ class App(ttk.Frame):
         self.btn_transcribe.configure(state="normal")
         self.btn_record.configure(state="normal")
         if code == 0:
-            self.log("完了しました。transcript.txt を確認してください。")
+            self.log("完了しました。「出力先を開く」で結果を確認できます。")
             self.log("")
         else:
             self.log(f"エラーで終了しました (code {code})")
@@ -466,8 +504,8 @@ def main():
     try:
         root = tk.Tk()
         root.title("会議録音・文字起こし (ローカル完結)")
-        root.geometry("680x720")
-        root.minsize(650, 690)
+        root.geometry("700x760")
+        root.minsize(670, 730)
         app = App(root)
         root.protocol("WM_DELETE_WINDOW", app.on_close)
         root.mainloop()

@@ -5,13 +5,18 @@
 """
 
 import json
+from pathlib import Path
 
 from apppaths import RECORDINGS_DIR, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 
 DEFAULTS = {
+    # 録音 (WAV) の保存先。1 時間で約 1.3GB 使うため容量のあるドライブを選べる
     "recordings_dir": str(RECORDINGS_DIR),
+    # 文字起こしの出力先。空文字は「入力と同じ場所」の意味。
+    # 議事録だけを別の場所（同期フォルダ等）にまとめたい場合に設定する
+    "transcripts_dir": "",
     "model": "large-v3-turbo",
     "threads": 4,
 }
@@ -41,5 +46,10 @@ def save(**changes):
 
 
 def recordings_dir():
-    from pathlib import Path
     return Path(load()["recordings_dir"])
+
+
+def transcripts_dir():
+    """設定されていれば Path、未設定なら None（＝入力と同じ場所に出す）."""
+    value = str(load()["transcripts_dir"]).strip()
+    return Path(value) if value else None
