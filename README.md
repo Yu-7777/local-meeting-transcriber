@@ -429,6 +429,7 @@ large-v3 が約 1.1 倍速でした。2 本のファイルを順に処理する�
 ## 構成
 
 ```
+LICENSE            MIT ライセンス
 gui.py / gui.bat   簡易 GUI（録音と文字起こしの実行のみ。結果はファイル出力）
 record.py          2 ストリーム同時録音 → system.wav / mic.wav / meta.json
 transcribe.py      文字起こし → transcript.txt
@@ -442,3 +443,11 @@ models/            Whisper モデル（初回取得後はオフラインで動�
 recordings/        録音データ
 ```
 
+
+---
+
+## ライセンス
+
+MIT License（[LICENSE](LICENSE)）
+
+自由に使用・改変・再配布できます。無保証です。
