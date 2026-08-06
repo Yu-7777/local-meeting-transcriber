@@ -385,14 +385,10 @@ class App(ttk.Frame):
 
     def _update_model_note(self):
         """未取得のモデルを選んだ時に、ダウンロードが要ることを見せる."""
-        import download_models
-
         self.lbl_model.configure(text=download_models.size_note(self.cb_model.get()))
 
     def _confirm_model_download(self, name):
         """未取得のモデルなら、数GB落とすことを確認する。続けるなら True."""
-        import download_models
-
         if download_models.is_downloaded(name):
             return True
         gb = download_models.model_size(name) or "?"
@@ -560,22 +556,41 @@ class App(ttk.Frame):
                          daemon=True).start()
 
     def _pump_output(self, proc):
-        """文字起こしの子プロセスの出力を読む。\\r 更新は進捗ラベルに回す."""
-        buf = b""
+        """子プロセスの出力を読む。単独の \\r による上書きだけ進捗ラベルへ回す.
+
+        Windows の Python はパイプへ出す print() の \\n を \\r\\n にするため、
+        \\r を見た時点では「行末」か「進捗の上書き」かを決められない。
+        次の 1 文字まで判断を遅らせる。これを間違えると通常のログが全部
+        進捗ラベル送りになり、失敗時に見るログが空になる。
+        """
+        buf, saw_cr = b"", False
+
+        def emit(kind):
+            nonlocal buf
+            line = buf.decode("utf-8", "replace").rstrip()
+            buf = b""
+            if line.strip():
+                self.msg_queue.put((kind, line))
+
         while True:
             ch = proc.stdout.read(1)
             if not ch:
                 break
-            if ch in b"\r\n":
-                line = buf.decode("utf-8", "replace").rstrip()
-                buf = b""
-                if line.strip():
-                    self.msg_queue.put(
-                        ("progress" if ch == b"\r" else "log", line))
+            if ch == b"\r":
+                if saw_cr:      # \r が続いた = 直前のは単独の \r だった
+                    emit("progress")
+                saw_cr = True
+                continue
+            if saw_cr:
+                saw_cr = False
+                emit("log" if ch == b"\n" else "progress")
+                if ch == b"\n":
+                    continue
+            if ch == b"\n":
+                emit("log")
             else:
                 buf += ch
-        if buf.strip():
-            self.msg_queue.put(("log", buf.decode("utf-8", "replace")))
+        emit("progress" if saw_cr else "log")
         proc.wait()
         self.msg_queue.put(("transcribe_done", proc.returncode))
 

@@ -1,12 +1,9 @@
 """録音した 2 本の WAV をローカルで文字起こしし、時系列にマージする.
 
 system.wav (相手) と mic.wav (自分) を別々に認識するため、話者ダイアライゼーション
-なしで「誰が話したか」が確定する。すべてローカルで完結し、外部送信は行わない。
+なしで「誰が話したか」が確定する。単体の音声ファイルも受け付ける。
 
-使い方:
-    python transcribe.py                      # recordings/ の最新を処理
-    python transcribe.py recordings/2026_08_05_14_30_定例MTG
-    python transcribe.py --model large-v3     # 精度優先（時間は数倍かかる）
+使い方は README「使い方（コマンドライン）」。
 """
 
 import argparse
@@ -173,8 +170,7 @@ def main():
     ap.add_argument("recording", nargs="?", type=Path, default=None,
                     help="録音フォルダ、または音声ファイル（省略時は最新の録音）")
     ap.add_argument("--outdir", type=Path, default=None,
-                    help="文字起こし結果の出力先"
-                         "（省略時は設定値、未設定なら入力と同じ場所）")
+                    help="文字起こし結果の出力先（省略時は設定値）")
     ap.add_argument("--model", default=None,
                     help="モデル名 (large-v3-turbo / large-v3 など)")
     ap.add_argument("--language", default="ja", help="言語コード。auto で自動判定")
@@ -183,12 +179,12 @@ def main():
     ap.add_argument("--offline", action="store_true",
                     help="ダウンロード済みモデルのみ使う（ネットワークに触れない）")
     ap.add_argument("--diarize", action="store_true",
-                    help="相手チャンネルを声質で話者ごとに分ける（相手が3人以上の時）")
+                    help="相手を声質で話者ごとに分ける（相手が複数人の時）")
     ap.add_argument("--speakers", type=int, default=None,
                     help="相手側の人数。まず自動を試すこと"
                          "（実測では指定しないほうが良い結果だった）")
     ap.add_argument("--diar-threshold", type=float, default=None,
-                    help="話者分離の統合しやすさ。大きいほど人数が減る (既定 0.9)")
+                    help="話者分離の統合しやすさ。大きいほど人数が減る")
     args = ap.parse_args()
     common.use_utf8_stdout()
 
@@ -208,9 +204,8 @@ def main():
 
     import download_models
 
-    # 取得済みなら常にローカルだけを見る。そうしないと faster-whisper が
-    # 毎回 HuggingFace へ更新確認に行き、「ネットワークを使うのは初回だけ」
-    # という前提が崩れる（音声は送られないが、通信は発生する）。
+    # 取得済みなら常にローカルだけを見る。そうしないと毎回 HuggingFace へ
+    # 更新確認に行き、「通信は初回だけ」という前提が崩れる。
     have_model = download_models.is_downloaded(model_name)
     if not have_model:
         # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし

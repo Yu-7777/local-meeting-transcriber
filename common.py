@@ -30,8 +30,9 @@ def hhmmss(sec):
 def use_utf8_stdout():
     """コンソールの文字化けを防ぐ。コンソールを使う main() の先頭で呼ぶ.
 
-    cp932 のままだとデバイス名の (R) などで UnicodeEncodeError になる
-    （実際に「インテル(R) スマート・サウンド」の丸 R で落ちた）。
+    cp932 に無い文字がデバイス名に入っていると UnicodeEncodeError になる。
+    実際に落ちたのは「インテル® スマート・サウンド」の ®（U+00AE の
+    丸 R。ASCII の "(R)" は cp932 で表せるので落ちない）。
     GUI は標準出力を使わないので呼んでいない。stderr は対象外。
     """
     if hasattr(sys.stdout, "reconfigure"):

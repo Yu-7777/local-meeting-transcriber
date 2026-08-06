@@ -66,7 +66,7 @@ if errorlevel 1 goto :fail
 
 rem Only the default model is fetched here. The higher accuracy model
 rem (large-v3, 2.9 GB) is downloaded on demand the first time it is picked,
-rem so first-time setup stays at about 1.6 GB instead of 4.6 GB.
+rem so first-time setup stays small. Sizes live in download_models.py.
 echo.
 echo [4/4] Downloading the speech model (about 1.6 GB, this takes a while)...
 ".venv\Scripts\python.exe" "download_models.py" large-v3-turbo --diarization

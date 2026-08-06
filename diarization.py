@@ -4,9 +4,7 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 自分の声は物理的に別ファイル(mic.wav)なので、ここでは相手側だけを扱えばよく、
 一般的な話者分離より条件が良い。
 
-会議音声はコーデック圧縮とノイズ抑制で劣化しているため、取り違えは起こり得る。
-num_speakers を指定すると人数を固定できるが、実測では指定しないほうが
-良い結果だった（README の掃引結果を参照）。自動が外れた時だけ使う。
+精度の限界と num_speakers の使いどころは README「精度について正直な注意」。
 """
 
 from collections import defaultdict
@@ -17,14 +15,11 @@ from apppaths import MODELS_DIR
 SEG_MODEL = MODELS_DIR / "diarization" / "segmentation.onnx"
 EMB_MODEL = MODELS_DIR / "diarization" / "embedding.onnx"
 
-# 実データ（YouTube の 3 人の対談 5 分）で閾値を掃引した結果:
-#   0.5 -> 25 人 / 0.7 -> 14 人 / 0.8 -> 10 人 / 0.9 -> 7 人(実質 3 人)
-# 会議音声はコーデック圧縮や場面ごとの音質差で同一人物の埋め込みが散るため、
-# 既定の 0.5 では同じ人が複数に割れる。統合寄りの 0.9 を既定にする。
+# 音質差で同一人物の埋め込みが散るため、低い閾値だと同じ人が複数に割れる。
+# 統合寄りにしてある（掃引結果は README「チューニングの実測データ」）。
 DEFAULT_THRESHOLD = 0.9
 
-# 合計発話がこの秒数に満たないクラスタは、BGM・効果音・音質変化による
-# 誤検出とみなして捨てる。これをしないと話者数が実態より大幅に膨らむ。
+# BGM や音質変化が「話者」に化けて人数が膨らむのを防ぐ足切り。
 MIN_SPEAKER_SEC = 3.0
 
 
@@ -58,7 +53,7 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
             model=str(EMB_MODEL), num_threads=threads
         ),
         clustering=sherpa_onnx.FastClusteringConfig(
-            # 人数が既知なら固定する。不明なら -1 で threshold により自動決定。
+            # -1 で自動（threshold が人数を決める）
             num_clusters=int(num_speakers) if num_speakers else -1,
             threshold=float(threshold),
         ),
