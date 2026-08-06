@@ -15,12 +15,13 @@
 MeetingTranscriber\
 ├── MeetingTranscriber.exe      ← これを実行
 ├── _internal\                  ← Python 本体と DLL 群（触らない）
-├── models\                     ← 別途コピーが必要（約4.5GB）
+├── models\                     ← 別途コピーが必要（turbo だけなら約1.6GB）
 └── recordings\                 ← 実行時に自動生成
 ```
 
-**`models\` は exe に同梱していません。** 4.5GB あり、exe に含めると
-ビルドも起動も現実的でなくなるためです。配布時は次のどちらかを選びます。
+**`models\` は exe に同梱していません。** turbo だけで 1.6GB、両方だと 4.5GB
+あり、exe に含めるとビルドも起動も現実的でなくなるためです。配布時は次の
+どちらかを選びます。
 
 1. `models\` フォルダを一緒に配る（USB / 社内ファイルサーバ経由）
 2. 配布先で初回に取得させる
@@ -127,9 +128,9 @@ exe に署名しても、その中から無署名の `av` や `sherpa_onnx` を�
 
 | 方法 | 印 |
 |---|---|
-| `Expand-Archive` で展開する | 伝播しない (推奨) |
+| **`setup.bat` だけを「許可する」** | それ以外は setup.bat が起動時に解除する (現在の手順) |
 | ZIP を「許可する」してから展開 | 消える |
-| 展開後に `Get-ChildItem -Recurse -File \| Unblock-File` | 消える |
+| `Expand-Archive` で展開する | そもそも伝播しない |
 | `git clone` で取得する | そもそも付かない |
 
 **「必ず起きるが必ず直せる」ソース配布のほうが、「たまに起きて絶対直せない」

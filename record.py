@@ -315,7 +315,8 @@ def resolve_loopback(p, index):
         if not info.get("isLoopbackDevice", False):
             raise SystemExit(
                 f"index {index} はループバックデバイスではありません。\n"
-                "check_devices.py の「ループバックデバイス」欄から選んでください。"
+                f"{common.cli_hint('devices')} の"
+                "「ループバックデバイス」欄から選んでください。"
             )
         return info
     try:
@@ -328,7 +329,8 @@ def resolve_loopback(p, index):
         if speakers["name"] in lb["name"]:
             return lb
     raise SystemExit(
-        "ループバックデバイスが見つかりませんでした。check_devices.py で確認してください。"
+        "ループバックデバイスが見つかりませんでした。"
+        f"{common.cli_hint('devices')} で確認してください。"
     )
 
 
@@ -414,7 +416,9 @@ class RecordingSession:
         self.meta = {
             "started_at": self.started_at.isoformat(),
             "wall_duration_sec": round(self.wall_duration, 3),
-            "aligned": True,  # 各 WAV は無音を詰めて同一時間軸に揃えてある
+            # 2 本は無音を詰めて同一時間軸に揃えてある。読む側はこれを
+            # 前提にしていて分岐はしない（記録として残しているだけ）
+            "aligned": True,
             "streams": {},
         }
         for r in self.recorders:

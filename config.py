@@ -12,10 +12,16 @@ from apppaths import RECORDINGS_DIR, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 
-# 文字起こしのスレッド数。実測（i7-1260P / large-v3-turbo / int8）では
-#   4 threads 37.0s / 8 threads 24.8s / 12 threads 26.9s
-# と 8 前後で頭打ちになり、それ以上は E コアを掴んで逆に遅くなる。
-DEFAULT_THREADS = min(8, os.cpu_count() or 4)
+# 文字起こしのスレッド数。
+#
+# 実測したのは i7-1260P (4P + 8E) の 1 機種のみ:
+#   4 threads 37.0s / 8 threads 24.8s / 12 threads 26.9s (large-v3-turbo / int8)
+# 8 を超えると E コアを掴んで遅くなる、というハイブリッド構成の事情による。
+#
+# 上限 8 はそこから引いた値で、**他の CPU では未検証**。P コアが 8 個以上ある
+# 機種（Ryzen 9 など）では取りこぼしている可能性がある。config.json の
+# threads で上書きできるので、速い機械では試す価値がある。
+DEFAULT_THREADS = min(8, os.cpu_count() or 4)  # or 4: cpu_count は稀に None
 
 DEFAULTS = {
     # 録音 (WAV) の保存先。1 時間で約 1.3GB 使うため容量のあるドライブを選べる

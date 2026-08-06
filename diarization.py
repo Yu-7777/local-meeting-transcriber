@@ -5,7 +5,8 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 一般的な話者分離より条件が良い。
 
 会議音声はコーデック圧縮とノイズ抑制で劣化しているため、取り違えは起こり得る。
-人数が分かっている場合は num_speakers を指定したほうが精度が上がる。
+num_speakers を指定すると人数を固定できるが、実測では指定しないほうが
+良い結果だった（README の掃引結果を参照）。自動が外れた時だけ使う。
 """
 
 from collections import defaultdict

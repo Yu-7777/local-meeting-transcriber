@@ -1,10 +1,11 @@
 """会議録音・文字起こしツールの簡易 GUI.
 
 録音の開始/停止と、文字起こしの実行だけを行う。
-結果は従来どおりファイル (transcript.txt) に出力する。
+結果はファイルに出力する（出力先によって名前が変わる。transcribe.py 参照）。
 
-録音は record.RecordingSession をそのまま使い、文字起こしは transcribe.py を
-サブプロセスとして呼ぶ。処理の実体を GUI 側に複製しないため。
+録音は record.RecordingSession をそのまま使い、文字起こしは app.py 経由で
+サブプロセスとして呼ぶ（exe 化しても同じ経路になる）。処理の実体を GUI 側に
+複製しないため。
 """
 
 import os
@@ -26,7 +27,7 @@ import download_models
 from apppaths import ROOT, child_command
 
 MODELS = download_models.ALL_MODELS
-# 対応形式は transcribe 側の定義から作る（片方だけ増えて選べなくなるのを防ぐ）
+# 対応形式は common の定義から作る（片方だけ増えて選べなくなるのを防ぐ）
 AUDIO_TYPES = [("音声・動画ファイル",
                 " ".join(f"*{s}" for s in sorted(common.AUDIO_SUFFIXES))),
                ("すべてのファイル", "*.*")]
@@ -392,7 +393,7 @@ class App(ttk.Frame):
 
         if download_models.is_downloaded(name):
             return True
-        gb = download_models.MODEL_SIZES.get(name, "?")
+        gb = download_models.model_size(name) or "?"
         return messagebox.askokcancel(
             "モデルのダウンロード",
             f"{name} はまだ取得していません。\n\n"
@@ -557,7 +558,7 @@ class App(ttk.Frame):
                          daemon=True).start()
 
     def _pump_output(self, proc):
-        """transcribe.py の出力を読む。\\r 更新は進捗ラベルに回す."""
+        """文字起こしの子プロセスの出力を読む。\\r 更新は進捗ラベルに回す."""
         buf = b""
         while True:
             ch = proc.stdout.read(1)

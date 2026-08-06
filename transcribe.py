@@ -5,7 +5,7 @@ system.wav (相手) と mic.wav (自分) を別々に認識するため、話者
 
 使い方:
     python transcribe.py                      # recordings/ の最新を処理
-    python transcribe.py recordings/20260802_164924
+    python transcribe.py recordings/2026_08_05_14_30_定例MTG
     python transcribe.py --model large-v3     # 精度優先（時間は数倍かかる）
 """
 
@@ -184,7 +184,8 @@ def main():
     ap.add_argument("--diarize", action="store_true",
                     help="相手チャンネルを声質で話者ごとに分ける（相手が3人以上の時）")
     ap.add_argument("--speakers", type=int, default=None,
-                    help="相手側の人数。分かっていれば指定すると精度が上がる")
+                    help="相手側の人数。まず自動を試すこと"
+                         "（実測では指定しないほうが良い結果だった）")
     ap.add_argument("--diar-threshold", type=float, default=None,
                     help="話者分離の統合しやすさ。大きいほど人数が減る (既定 0.9)")
     args = ap.parse_args()
