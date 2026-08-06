@@ -1,42 +1,29 @@
-"""単一の実行ファイルから各機能へ振り分けるエントリポイント.
+"""各機能へ振り分けるエントリポイント（サブコマンドの一覧は BUILD.md）.
 
-    app.exe                    -> GUI
-    app.exe transcribe <dir>   -> 文字起こし
-    app.exe record             -> 録音 (CLI)
-    app.exe devices            -> デバイス一覧
-    app.exe download --all     -> モデル取得
-    app.exe shortcut           -> ショートカット作成
-
-exe 化すると python.exe が無くなるため、GUI からの文字起こし呼び出しも
-この振り分けを経由して自分自身を起動する。
+exe には python.exe が無いので、GUI からの文字起こし呼び出しもここを
+経由して自分自身を起動する。
 """
 
+import importlib
 import sys
+
+COMMANDS = {
+    "transcribe": "transcribe",
+    "record": "record",
+    "devices": "check_devices",
+    "download": "download_models",
+    "shortcut": "shortcut",
+}
 
 
 def main():
     argv = sys.argv[1:]
-    cmd = argv[0] if argv else None
-
-    if cmd in ("transcribe", "record", "devices", "download", "shortcut"):
-        sys.argv = [sys.argv[0]] + argv[1:]
-        if cmd == "transcribe":
-            import transcribe
-            return transcribe.main()
-        if cmd == "record":
-            import record
-            return record.main()
-        if cmd == "devices":
-            import check_devices
-            return check_devices.main()
-        if cmd == "shortcut":
-            import shortcut
-            return shortcut.main()
-        import download_models
-        return download_models.main()
-
-    import gui
-    return gui.main()
+    module = COMMANDS.get(argv[0]) if argv else None
+    if module is None:
+        import gui
+        return gui.main()
+    sys.argv = [sys.argv[0], *argv[1:]]
+    return importlib.import_module(module).main()
 
 
 if __name__ == "__main__":

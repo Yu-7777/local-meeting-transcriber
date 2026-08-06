@@ -204,12 +204,10 @@ def main():
 
     import download_models
 
-    # 取得済みなら常にローカルだけを見る。そうしないと毎回 HuggingFace へ
-    # 更新確認に行き、「通信は初回だけ」という前提が崩れる。
+    # 取得済みなら必ずローカルだけを見る（毎回 Hub へ更新確認に行かせない）
     have_model = download_models.is_downloaded(model_name)
     if not have_model:
-        # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし
-        # 始めると固まったように見えるので、何が起きるか先に伝える。
+        # 黙って数 GB 落とし始めると固まったように見えるので先に伝える
         gb = download_models.model_size(model_name)
         size = f"約 {gb} GB" if gb else "数 GB"
         if args.offline:

@@ -81,9 +81,8 @@ class App(ttk.Frame):
         self._build_transcribe_box()
         self._build_log_box()
 
-        # 列挙は WASAPI 初期化を伴い、初回だけ 0.3 秒ほどかかる。窓を先に
-        # 出したいので後回しにする。after(0) だと窓が表示される前に走って
-        # しまう（実測: after(0) は winfo_ismapped()==0、after(1) 以降は 1）。
+        # 列挙は初回だけ 0.3 秒ほどかかるので窓を先に出す。after(0) では
+        # まだ窓が表示されていないため 0 にしない。
         self.after(50, self.refresh_devices)
         self.refresh_recordings()
         self.after(100, self._drain_queue)
@@ -348,7 +347,7 @@ class App(ttk.Frame):
         return False
 
     def delete_recording(self):
-        """選択中の録音をごみ箱へ移す（完全削除はしない）."""
+        """選択中の録音をごみ箱へ移す."""
         if self.delete_terminal_busy():
             return
         target = self._selected_recording("削除")
@@ -558,10 +557,8 @@ class App(ttk.Frame):
     def _pump_output(self, proc):
         """子プロセスの出力を読む。単独の \\r による上書きだけ進捗ラベルへ回す.
 
-        Windows の Python はパイプへ出す print() の \\n を \\r\\n にするため、
-        \\r を見た時点では「行末」か「進捗の上書き」かを決められない。
-        次の 1 文字まで判断を遅らせる。これを間違えると通常のログが全部
-        進捗ラベル送りになり、失敗時に見るログが空になる。
+        Windows は print() の \\n を \\r\\n にして出すので、\\r を見た時点では
+        行末か上書きか決まらない。次の 1 文字まで判断を遅らせる。
         """
         buf, saw_cr = b"", False
 

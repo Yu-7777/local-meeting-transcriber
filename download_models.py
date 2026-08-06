@@ -15,8 +15,7 @@ import common
 import diarization
 from apppaths import MODELS_DIR
 
-# モデルの正本。名前を増やす時はここだけ直せばよい
-# （取得済み判定は models/models--<org>--<repo>/snapshots/<hash>/model.bin の有無）。
+# モデルの正本。名前を増やす時はここだけ直す
 MODELS = {
     "large-v3-turbo": ("mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1.6),
     "large-v3": ("Systran/faster-whisper-large-v3", 2.9),
@@ -33,7 +32,7 @@ EMB_URL = (
     "speaker-recongition-models/"
     "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
 )
-# 置き場所は diarization.py が正本（そちらが読む側なので）
+# 置き場所は diarization.py が正本
 SEG_PATH = diarization.SEG_MODEL
 EMB_PATH = diarization.EMB_MODEL
 DIA_DIR = SEG_PATH.parent

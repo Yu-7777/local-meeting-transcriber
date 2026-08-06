@@ -1,15 +1,8 @@
-"""スタートメニュー（と、希望すればデスクトップ）にショートカットを作る.
+"""スタートメニュー（希望すればデスクトップにも）にショートカットを作る.
 
-毎回 gui.bat を探しに行くのは手間なので、セットアップの最後に作る。
-既定でスタートメニューだけにするのは、普通のアプリが必ず登録する場所で
-誰の邪魔にもならないため。デスクトップにアイコンが並ぶのを嫌う人がいるので、
-そちらは明示的に希望した時だけ作る。
-
-リンク先は起動するものを直接指す（ソース実行なら pythonw.exe、exe 版なら
-exe 自身）。gui.bat 経由にすると黒い窓が一瞬光るため。
-
-外部ライブラリは使わず PowerShell に .lnk を作らせる。pywin32 を足すと
-依存が増え、スマート アプリ コントロールに引っかかる面が増えるため。
+既定をスタートメニューだけにするのは、デスクトップにアイコンが並ぶのを
+嫌う人がいるため。gui.bat でなく起動するもの自体を指すのは黒い窓を出さない
+ため。pywin32 を使わず PowerShell に作らせるのは依存を増やさないため。
 """
 
 import argparse
@@ -23,8 +16,7 @@ from apppaths import FROZEN, ROOT
 
 NAME = "会議録音・文字起こし"
 
-# OneDrive にリダイレクトされている場合があるので、パスは決め打ちにせず
-# Windows に問い合わせる。
+# 保存先は OneDrive にリダイレクトされることがあるので Windows に聞く
 PS_TEMPLATE = """
 $ErrorActionPreference = 'Stop'
 $target  = {target}
@@ -81,8 +73,7 @@ def create(desktop=False):
         workdir=_quote(workdir), icon=_quote(icon), name=NAME,
         folders=", ".join(folders),
     )
-    # -Command に日本語を渡すと環境によって化けるので、UTF-8 BOM 付きの
-    # ファイルにして -File で渡す
+    # -Command 経由だと日本語が化けるので、BOM 付きファイルを -File で渡す
     with tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False,
                                      encoding="utf-8-sig") as f:
         f.write(script)
