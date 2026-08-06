@@ -27,6 +27,7 @@ import download_models
 from apppaths import ROOT, child_command
 
 MODELS = download_models.ALL_MODELS
+FILE_LOCKED_HINT = "音声ファイルを開いているアプリがあれば閉じてください。"
 # 対応形式は common の定義から作る（片方だけ増えて選べなくなるのを防ぐ）
 AUDIO_TYPES = [("音声・動画ファイル",
                 " ".join(f"*{s}" for s in sorted(common.AUDIO_SUFFIXES))),
@@ -303,7 +304,7 @@ class App(ttk.Frame):
 
     def rename_recording(self):
         """選択中の録音の名前部分だけを付け替える（日時は変えない）."""
-        if self.delete_terminal_busy():
+        if self._busy():
             return
         target = self._selected_recording("改名")
         if target is None:
@@ -320,7 +321,7 @@ class App(ttk.Frame):
         except OSError as exc:
             messagebox.showerror(
                 "改名できません",
-                f"{exc}\n\n録音の音声ファイルを開いているアプリがあれば閉じてください。")
+                f"{exc}\n\n{FILE_LOCKED_HINT}")
             return
         self.log(f"改名しました: {target.name} -> {renamed.name}")
         self.refresh_recordings()
@@ -336,8 +337,8 @@ class App(ttk.Frame):
             return None
         return self._recordings[idx]
 
-    def delete_terminal_busy(self):
-        """録音中・文字起こし中は録音フォルダを触らせない."""
+    def _busy(self):
+        """録音中・文字起こし中なら案内を出して True を返す."""
         if self.session is not None:
             messagebox.showwarning("録音中", "先に録音を停止してください。")
             return True
@@ -348,7 +349,7 @@ class App(ttk.Frame):
 
     def delete_recording(self):
         """選択中の録音をごみ箱へ移す."""
-        if self.delete_terminal_busy():
+        if self._busy():
             return
         target = self._selected_recording("削除")
         if target is None:
@@ -368,7 +369,7 @@ class App(ttk.Frame):
         except OSError as exc:
             messagebox.showerror(
                 "削除できません",
-                f"{exc}\n\n音声ファイルを開いているアプリがあれば閉じてください。")
+                f"{exc}\n\n{FILE_LOCKED_HINT}")
             return
         self.log(f"ごみ箱へ移動しました: {target.name} ({size_mb:,.0f} MB)")
         self.refresh_recordings()
@@ -388,15 +389,12 @@ class App(ttk.Frame):
 
     def _confirm_model_download(self, name):
         """未取得のモデルなら、数GB落とすことを確認する。続けるなら True."""
-        if download_models.is_downloaded(name):
+        notice = download_models.download_notice(name)
+        if not notice:
             return True
-        gb = download_models.model_size(name) or "?"
         return messagebox.askokcancel(
             "モデルのダウンロード",
-            f"{name} はまだ取得していません。\n\n"
-            f"初回のみ約 {gb} GB のダウンロードが発生します"
-            "（回線によっては数分〜数十分）。\n"
-            "次回からは不要です。\n\n続けますか?")
+            f"{name} はまだ取得していません。\n\n{notice}\n\n続けますか?")
 
     def _toggle_speakers(self):
         self.cb_speakers.configure(
@@ -424,8 +422,7 @@ class App(ttk.Frame):
             self.stop_record()
 
     def start_record(self):
-        if self.proc is not None:
-            messagebox.showwarning("実行中", "文字起こしの実行中は録音できません。")
+        if self._busy():
             return
         try:
             lb = self._loopbacks[self.cb_loopback.current()][1]
@@ -514,8 +511,7 @@ class App(ttk.Frame):
         録音停止直後の自動実行では、一覧の選択状態に左右されず、いま録った
         ものを確実に対象にするため録音先を直接渡す。
         """
-        if self.session is not None:
-            messagebox.showwarning("録音中", "先に録音を停止してください。")
+        if self._busy():
             return
         if target is None:
             if self.picked_file is not None:

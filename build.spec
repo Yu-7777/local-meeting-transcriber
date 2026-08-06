@@ -1,9 +1,4 @@
-# PyInstaller spec — 会議録音・文字起こしツール
-#
-# onedir 構成にする理由:
-#   onefile は起動のたびに 300MB 超の DLL を temp に展開するため起動が遅く、
-#   ネイティブ依存が多い構成では失敗しやすい。市販ソフト同様「exe + DLL 群の
-#   フォルダ」にする。models/ と recordings/ は exe の隣に置く（同梱しない）。
+# PyInstaller spec（onedir 構成。理由は BUILD.md「onedir にした理由」）
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 

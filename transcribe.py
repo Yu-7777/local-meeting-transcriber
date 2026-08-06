@@ -208,16 +208,14 @@ def main():
     have_model = download_models.is_downloaded(model_name)
     if not have_model:
         # 黙って数 GB 落とし始めると固まったように見えるので先に伝える
-        gb = download_models.model_size(model_name)
-        size = f"約 {gb} GB" if gb else "数 GB"
         if args.offline:
             raise SystemExit(
-                f"\n{model_name} はまだ取得していません（{size}）。\n"
+                f"\n{model_name} はまだ取得していません"
+                f"（{download_models.size_text(model_name)}）。\n"
                 "--offline を外して実行するか、先に次を実行してください:\n"
                 f"  {common.cli_hint('download', model_name)}"
             )
-        print(f"\n※ {model_name} は初回のため {size} をダウンロードします。")
-        print("  回線によっては数分〜数十分かかります。次回からは不要です。")
+        print(f"\n※ {model_name}: {download_models.download_notice(model_name)}")
 
     from faster_whisper import WhisperModel
 

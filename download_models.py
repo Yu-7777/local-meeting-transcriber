@@ -56,12 +56,26 @@ def is_downloaded(name):
     return any(s.joinpath("model.bin").exists() for s in snapshots.iterdir())
 
 
-def size_note(name):
-    """未取得なら「約N GBのダウンロードが要る」旨の文字列、取得済みなら空文字."""
+def size_text(name):
+    """「約 2.9 GB」のような表示用の文字列."""
+    gb = model_size(name)
+    return f"約 {gb} GB" if gb else "数 GB"
+
+
+def download_notice(name):
+    """未取得なら初回に何が起きるかの一文、取得済みなら空文字.
+
+    同じことを言う文面が散らばらないよう、ここを唯一の出どころにする。
+    """
     if is_downloaded(name):
         return ""
-    gb = model_size(name)
-    return f"未取得（初回に約 {gb} GB のダウンロードが必要）" if gb else "未取得"
+    return (f"初回のみ {size_text(name)} のダウンロードが発生します"
+            "（回線によっては数分〜数十分）。次回からは不要です。")
+
+
+def size_note(name):
+    """未取得のモデルに付ける短い注記。取得済みなら空文字."""
+    return f"未取得（{size_text(name)}）" if not is_downloaded(name) else ""
 
 
 def _fetch(url):
@@ -98,10 +112,7 @@ def download(name):
         print(f"--- {name} は取得済み ---\n")
         return
 
-    gb = model_size(name)
-    size = f"（約 {gb} GB）" if gb else ""
-    print(f"--- {name} を取得しています{size} ---")
-    print("    回線によっては時間がかかります。")
+    print(f"--- {name} を取得しています（{size_text(name)}）---")
     WhisperModel(name, device="cpu", compute_type="int8", download_root=str(MODELS_DIR))
     print(f"--- {name} 取得完了 ---\n")
 
