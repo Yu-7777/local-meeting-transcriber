@@ -13,49 +13,37 @@ import argparse
 import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
+import common
 import config
 from apppaths import MODELS_DIR
+from common import AUDIO_SUFFIXES, hhmmss
 
 # 無音区間に対する幻聴を落とすための閾値
 NO_SPEECH_THRESHOLD = 0.8
 
-# 単体ファイルを直接指定された場合に受け付ける拡張子
-AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma",
-                  ".mp4", ".mkv", ".webm", ".mov"}
-
-
-def hhmmss(sec):
-    sec = max(0, int(sec))
-    return f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
-
 
 def latest_recording(base=None):
-    base = Path(base) if base else config.recordings_dir()
-    if not base.exists():
-        raise SystemExit(
-            f"{base} がありません。先に録音するか、対象を引数で指定してください。"
-        )
-    dirs = [d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()]
+    dirs = common.list_recordings(base)
     if not dirs:
         raise SystemExit(
-            f"{base} に録音が見つかりません。"
+            f"{base or config.recordings_dir()} に録音が見つかりません。"
             "先に録音するか、音声ファイルを直接指定してください。"
         )
-    return max(dirs, key=lambda d: d.stat().st_mtime)
+    return dirs[0]
 
 
 def resolve_outdir(explicit, fallback):
     """出力先を決める。明示指定 > 設定値 > 入力と同じ場所 の優先順."""
     if explicit:
         return Path(explicit)
-    configured = config.transcripts_dir()
-    return configured if configured else Path(fallback)
+    return config.transcripts_dir() or Path(fallback)
 
 
 def build_plan(target, outdir=None):
-    """入力の指定から (出力先, [(wav, ラベル, 話者分離するか)], meta) を組み立てる.
+    """入力の指定から (出力先, [(wav, ラベル, 話者分離するか)], meta, 接頭辞) を組み立てる.
 
     受け付ける形:
       - 録音フォルダ (meta.json あり) -> 相手/自分の 2 本
@@ -71,9 +59,8 @@ def build_plan(target, outdir=None):
             raise SystemExit(f"対応していない形式です: {target.suffix}")
         out = resolve_outdir(outdir, target.parent)
         out.mkdir(parents=True, exist_ok=True)
-        meta = {"started_at": "-", "wall_duration_sec": 0, "single_file": True}
         # 単体ファイルは誰の声か分からないので話者ラベルを付けない
-        return out, [(target, None, True, 0.0)], meta, target.stem
+        return out, [(target, None, True)], {"single_file": True}, target.stem
 
     meta_path = target / "meta.json"
     if not meta_path.exists():
@@ -82,7 +69,6 @@ def build_plan(target, outdir=None):
             "音声ファイルを直接指定することもできます。"
         )
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    aligned = meta.get("aligned", False)
     items = []
     for name in ("system", "mic"):
         info = meta["streams"].get(name)
@@ -92,8 +78,7 @@ def build_plan(target, outdir=None):
         if not wav.exists():
             print(f"  ※ {wav.name} が見つかりません。スキップします。")
             continue
-        offset = 0.0 if aligned else float(info.get("start_delay_sec", 0.0))
-        items.append((wav, info["label"], name == "system", offset))
+        items.append((wav, info["label"], name == "system"))
 
     out = resolve_outdir(outdir, target)
     out.mkdir(parents=True, exist_ok=True)
@@ -101,14 +86,6 @@ def build_plan(target, outdir=None):
     # 録音ごとに同名になって上書きしてしまうので、録音フォルダ名を前に付ける。
     same_place = out.resolve() == target.resolve()
     return out, items, meta, None if same_place else target.name
-
-
-def assign_speaker_safe(turns, start, end):
-    if not turns:
-        return None
-    import diarization
-
-    return diarization.assign_speaker(start, end, turns)
 
 
 def run_diarization(wav_path, num_speakers, threads, threshold):
@@ -126,13 +103,13 @@ def run_diarization(wav_path, num_speakers, threads, threshold):
         print(f"\r  {processed / total * 100:5.1f}%   ", end="", flush=True)
         return 0
 
+    # SystemExit は BaseException 直下なので、下の except Exception では
+    # 捕まらずそのまま呼び出し元へ抜ける（モデル未取得の案内を潰さないため）
     try:
         turns, stats = diarization.diarize(
             wav_path, num_speakers=num_speakers, threshold=threshold,
             threads=threads, on_progress=progress
         )
-    except SystemExit:
-        raise
     except Exception as exc:
         print(f"\n  ※ 話者分離に失敗しました: {exc}")
         print("  ※ 話者ラベルなしで続行します。")
@@ -145,7 +122,7 @@ def run_diarization(wav_path, num_speakers, threads, threshold):
     return turns
 
 
-def transcribe_stream(model, wav_path, label, offset, language, beam_size):
+def transcribe_stream(model, wav_path, label, language, beam_size):
     """1 本の WAV を認識してセグメントのリストを返す."""
     print(f"\n--- {label} ({wav_path.name}) ---")
     segments, info = model.transcribe(
@@ -178,8 +155,8 @@ def transcribe_stream(model, wav_path, label, offset, language, beam_size):
 
         results.append({
             "speaker": label,
-            "start": seg.start + offset,
-            "end": seg.end + offset,  # 話者分離の区間との重なり判定に使う
+            "start": seg.start,
+            "end": seg.end,  # 話者分離の区間との重なり判定に使う
             "text": text,
         })
 
@@ -211,9 +188,7 @@ def main():
     ap.add_argument("--diar-threshold", type=float, default=None,
                     help="話者分離の統合しやすさ。大きいほど人数が減る (既定 0.9)")
     args = ap.parse_args()
-
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    common.use_utf8_stdout()
 
     cfg = config.load()
     model_name = args.model or cfg["model"]
@@ -223,7 +198,7 @@ def main():
 
     print("=" * 68)
     print(f"  対象   : {args.recording or '(最新の録音)'}")
-    for wav, label, _, _ in items:
+    for wav, label, _ in items:
         print(f"           {wav.name}" + (f"  [{label}]" if label else ""))
     print(f"  出力   : {out_dir}")
     print(f"  モデル : {model_name} (CPU / int8 / {threads} threads)")
@@ -234,13 +209,13 @@ def main():
     # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし始めると
     # 固まったように見えるので、何が起きるか先に伝える。
     if not download_models.is_downloaded(model_name):
-        gb = download_models.MODEL_SIZES.get(model_name)
+        gb = download_models.model_size(model_name)
         size = f"約 {gb} GB" if gb else "数 GB"
         if args.offline:
             raise SystemExit(
                 f"\n{model_name} はまだ取得していません（{size}）。\n"
                 "--offline を外して実行するか、先に次を実行してください:\n"
-                f"  .venv\\Scripts\\python.exe download_models.py {model_name}"
+                f"  {common.cli_hint('download', model_name)}"
             )
         print(f"\n※ {model_name} は初回のため {size} をダウンロードします。")
         print("  回線によっては数分〜数十分かかります。次回からは不要です。")
@@ -262,31 +237,20 @@ def main():
     language = None if args.language == "auto" else args.language
 
     all_segments = []
-    for wav_path, label, diarizable, offset in items:
+    for wav_path, label, diarizable in items:
         segs = transcribe_stream(
-            model, wav_path, label or "", offset, language, args.beam_size
+            model, wav_path, label or "", language, args.beam_size
         )
 
         # 相手チャンネルだけ話者分離する（自分は分ける必要がない）
         if args.diarize and diarizable:
-            import diarization as _dia
-            thr = args.diar_threshold or _dia.DEFAULT_THRESHOLD
+            import diarization
+
+            thr = args.diar_threshold or diarization.DEFAULT_THRESHOLD
             turns = run_diarization(wav_path, args.speakers, threads, thr)
-            raw = [
-                assign_speaker_safe(turns, s["start"] - offset, s["end"] - offset)
-                for s in segs
-            ]
-            # クラスタ番号は飛び番になることがあるので、登場順に振り直す
-            order = {}
-            for spk in raw:
-                if spk is not None and spk not in order:
-                    order[spk] = len(order) + 1
-            for s, spk in zip(segs, raw):
-                if spk is not None:
-                    s["speaker"] = (f"{label}(話者{order[spk]})" if label
-                                    else f"話者{order[spk]}")
-            if order:
-                print(f"  実際に発言した話者: {len(order)} 名")
+            spoke = diarization.label_segments(segs, turns, label)
+            if spoke:
+                print(f"  実際に発言した話者: {spoke} 名")
 
         all_segments.extend(segs)
 
@@ -308,10 +272,7 @@ def main():
     transcript_path = out_dir / f"{prefix}transcript.txt"
     transcript_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    by_speaker = {}
-    for s in all_segments:
-        key = s["speaker"] or "(話者なし)"
-        by_speaker[key] = by_speaker.get(key, 0) + 1
+    by_speaker = Counter(s["speaker"] or "(話者なし)" for s in all_segments)
 
     print()
     print("=" * 68)

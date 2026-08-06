@@ -22,6 +22,7 @@ datas += collect_data_files("faster_whisper")
 
 hiddenimports += ["faster_whisper", "diarization", "transcribe", "record",
                   "check_devices", "download_models", "gui", "apppaths", "config",
+                  "common",
                    "shortcut"]
 
 a = Analysis(

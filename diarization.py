@@ -10,6 +10,7 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 
 from collections import defaultdict
 
+import common
 from apppaths import MODELS_DIR
 
 SEG_MODEL = MODELS_DIR / "diarization" / "segmentation.onnx"
@@ -31,7 +32,7 @@ def models_available():
 
 
 def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
-            min_speaker_sec=MIN_SPEAKER_SEC, on_progress=None):
+            on_progress=None):
     """話者分離を行い (turns, stats) を返す.
 
     turns は (start, end, speaker_index) のリスト（開始時刻順）。
@@ -42,7 +43,7 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
     if not models_available():
         raise SystemExit(
             "話者分離モデルがありません。次を実行してください:\n"
-            "  .venv\\Scripts\\python.exe download_models.py --diarization"
+            f"  {common.cli_hint('download', '--diarization')}"
         )
 
     config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
@@ -68,11 +69,8 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
 
     sd = sherpa_onnx.OfflineSpeakerDiarization(config)
     audio = decode_audio(str(wav_path), sampling_rate=sd.sample_rate)
-
-    if on_progress is not None:
-        result = sd.process(audio, callback=on_progress)
-    else:
-        result = sd.process(audio)
+    result = sd.process(audio, callback=on_progress)
+    del audio  # 1 時間で 230MB。Whisper のモデルと同時に抱えないよう早めに解放
 
     turns = [(s.start, s.end, s.speaker) for s in result.sort_by_start_time()]
 
@@ -82,14 +80,14 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
 
     # 人数を明示指定された場合は、指定どおりに残す（間引くと意図に反するため）
     if num_speakers:
-        return turns, {"raw": len(spoken), "kept": len(spoken), "dropped": 0}
+        keep = set(spoken)
+    else:
+        keep = {spk for spk, sec in spoken.items() if sec >= MIN_SPEAKER_SEC}
+        if not keep and spoken:  # 全部短い場合は最長のものだけ残す
+            keep = {max(spoken, key=spoken.get)}
 
-    keep = {spk for spk, sec in spoken.items() if sec >= min_speaker_sec}
-    if not keep:  # 全部短い場合は最長のものだけ残す
-        keep = {max(spoken, key=spoken.get)} if spoken else set()
-    filtered = [t for t in turns if t[2] in keep]
-    return filtered, {"raw": len(spoken), "kept": len(keep),
-                      "dropped": len(spoken) - len(keep)}
+    return ([t for t in turns if t[2] in keep],
+            {"raw": len(spoken), "kept": len(keep), "dropped": len(spoken) - len(keep)})
 
 
 def assign_speaker(start, end, turns):
@@ -100,3 +98,19 @@ def assign_speaker(start, end, turns):
         if overlap > best_overlap:
             best_overlap, best_speaker = overlap, speaker
     return best_speaker
+
+
+def label_segments(segments, turns, base_label):
+    """文字起こしセグメントに話者ラベルを書き込み、実際に発言した話者数を返す.
+
+    sherpa のクラスタ番号は飛び番になるので、登場順に 1 から振り直す。
+    ここに置いてあるのは、番号の振り直しが話者分離側の事情だから。
+    """
+    assigned = [assign_speaker(s["start"], s["end"], turns) for s in segments]
+    order = {spk: i for i, spk in
+             enumerate(dict.fromkeys(s for s in assigned if s is not None), 1)}
+    for seg, spk in zip(segments, assigned):
+        if spk is not None:
+            seg["speaker"] = (f"{base_label}(話者{order[spk]})" if base_label
+                              else f"話者{order[spk]}")
+    return len(order)

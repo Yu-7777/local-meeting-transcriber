@@ -7,6 +7,8 @@ import sys
 
 import pyaudiowpatch as pyaudio
 
+import common
+
 
 def fmt(info, mark=""):
     return (
@@ -17,9 +19,7 @@ def fmt(info, mark=""):
 
 
 def main():
-    # デバイス名に (R) などの記号が入ることがあり、cp932 のままだと落ちる
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    common.use_utf8_stdout()
 
     p = pyaudio.PyAudio()
     try:
@@ -71,7 +71,8 @@ def main():
 
         print()
         print("* = 既定のデバイス")
-        print("既定以外を使う場合: python record.py --mic <index> --loopback <index>")
+        print("既定以外を使う場合: "
+              f"{common.cli_hint('record')} --mic <index> --loopback <index>")
         return 0
     finally:
         p.terminate()

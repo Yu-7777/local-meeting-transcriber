@@ -5,11 +5,17 @@
 """
 
 import json
+import os
 from pathlib import Path
 
 from apppaths import RECORDINGS_DIR, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
+
+# 文字起こしのスレッド数。実測（i7-1260P / large-v3-turbo / int8）では
+#   4 threads 37.0s / 8 threads 24.8s / 12 threads 26.9s
+# と 8 前後で頭打ちになり、それ以上は E コアを掴んで逆に遅くなる。
+DEFAULT_THREADS = min(8, os.cpu_count() or 4)
 
 DEFAULTS = {
     # 録音 (WAV) の保存先。1 時間で約 1.3GB 使うため容量のあるドライブを選べる
@@ -18,27 +24,31 @@ DEFAULTS = {
     # 議事録だけを別の場所（同期フォルダ等）にまとめたい場合に設定する
     "transcripts_dir": "",
     "model": "large-v3-turbo",
-    "threads": 4,
+    "threads": DEFAULT_THREADS,
     # 録音を停止したら、そのまま文字起こしまで走らせるか
     "auto_transcribe": False,
 }
 
 
+def _known(values):
+    """DEFAULTS に無いキーは受け付けない（設定ファイルの汚れを持ち込まない）."""
+    return {k: v for k, v in values.items() if k in DEFAULTS}
+
+
 def load():
     cfg = dict(DEFAULTS)
-    if CONFIG_PATH.exists():
-        try:
-            saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            if isinstance(saved, dict):
-                cfg.update({k: v for k, v in saved.items() if k in DEFAULTS})
-        except (json.JSONDecodeError, OSError):
-            pass  # 壊れていたら既定値で続行する
+    try:
+        saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return cfg  # 無い・壊れている -> 既定値で続行する
+    if isinstance(saved, dict):
+        cfg.update(_known(saved))
     return cfg
 
 
 def save(**changes):
     cfg = load()
-    cfg.update({k: v for k, v in changes.items() if k in DEFAULTS})
+    cfg.update(_known(changes))
     try:
         CONFIG_PATH.write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")

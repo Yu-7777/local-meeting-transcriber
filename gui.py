@@ -21,11 +21,14 @@ import pyaudiowpatch as pyaudio
 import config
 import record
 
-from apppaths import ROOT, child_command  # noqa: E402
+import common
+import download_models
+from apppaths import ROOT, child_command
 
-MODELS = ["large-v3-turbo", "large-v3"]
+MODELS = download_models.ALL_MODELS
+# 対応形式は transcribe 側の定義から作る（片方だけ増えて選べなくなるのを防ぐ）
 AUDIO_TYPES = [("音声・動画ファイル",
-                "*.wav *.mp3 *.m4a *.flac *.ogg *.aac *.wma *.mp4 *.mkv *.webm"),
+                " ".join(f"*{s}" for s in sorted(common.AUDIO_SUFFIXES))),
                ("すべてのファイル", "*.*")]
 
 
@@ -58,14 +61,6 @@ def list_devices():
         p.terminate()
 
 
-def list_recordings(base=None):
-    base = Path(base) if base else config.recordings_dir()
-    if not base.exists():
-        return []
-    dirs = [d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()]
-    return sorted(dirs, key=lambda d: d.stat().st_mtime, reverse=True)
-
-
 class App(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=12)
@@ -77,12 +72,16 @@ class App(ttk.Frame):
         self.session = None
         self.proc = None
         self.msg_queue = queue.Queue()
+        self._recordings = []
+        self._loopbacks = []
+        self._mics = []
 
         self._build_record_box()
         self._build_transcribe_box()
         self._build_log_box()
 
-        self.refresh_devices()
+        # 列挙は WASAPI 初期化を伴い 0.3 秒ほどかかる。先に窓を出す
+        self.after(0, self.refresh_devices)
         self.refresh_recordings()
         self.after(100, self._drain_queue)
 
@@ -255,7 +254,7 @@ class App(ttk.Frame):
                 cb.current(default)
 
     def refresh_recordings(self):
-        self._recordings = list_recordings(self.var_savedir.get())
+        self._recordings = common.list_recordings(self.var_savedir.get())
         self.cb_rec["values"] = [d.name for d in self._recordings]
         if self._recordings:
             self.cb_rec.current(0)
@@ -329,7 +328,7 @@ class App(ttk.Frame):
     def _selected_recording(self, action):
         """一覧で選択中の録音を返す。選べていなければ案内して None."""
         idx = self.cb_rec.current()
-        if idx < 0 or not getattr(self, "_recordings", []):
+        if idx < 0 or not self._recordings:
             messagebox.showinfo("対象がありません",
                                 f"{action}する録音を選んでください。")
             return None
@@ -414,7 +413,7 @@ class App(ttk.Frame):
         else:
             target = Path(self.var_savedir.get())
             idx = self.cb_rec.current()
-            if 0 <= idx < len(getattr(self, "_recordings", [])):
+            if 0 <= idx < len(self._recordings):
                 target = self._recordings[idx]
         target.mkdir(parents=True, exist_ok=True)
         os.startfile(str(target))
@@ -441,11 +440,7 @@ class App(ttk.Frame):
             self.session = record.RecordingSession(
                 mic_index=mic, loopback_index=lb, name=self.var_recname.get())
             self.session.start()
-        except SystemExit as exc:
-            self.session = None
-            messagebox.showerror("録音を開始できません", str(exc))
-            return
-        except Exception as exc:
+        except (SystemExit, Exception) as exc:  # SystemExit は BaseException 直下
             self.session = None
             messagebox.showerror("録音を開始できません", str(exc))
             return
@@ -460,11 +455,11 @@ class App(ttk.Frame):
     def _tick(self):
         if self.session is None:
             return
-        self.lbl_time.configure(text=record.hhmmss(self.session.elapsed))
+        self.lbl_time.configure(text=common.hhmmss(self.session.elapsed))
         for r in self.session.recorders:
             pb, db = self.meters[r.label]
-            _, decibels = record.bar(r.level)
-            pb["value"] = max(0.0, min(100.0, (decibels + 60.0) / 60.0 * 100.0))
+            decibels = record.level_db(r.level)
+            pb["value"] = record.level_ratio(r.level) * 100
             db.configure(text=f"{decibels:6.1f} dB")
         pending = self.session.pending
         if pending:
@@ -529,7 +524,7 @@ class App(ttk.Frame):
                 target = self.picked_file
             else:
                 idx = self.cb_rec.current()
-                if idx < 0 or not getattr(self, "_recordings", []):
+                if idx < 0 or not self._recordings:
                     messagebox.showinfo(
                         "対象がありません",
                         "先に録音するか、「音声ファイルを選ぶ...」で指定してください。")
@@ -540,10 +535,9 @@ class App(ttk.Frame):
             return
 
         config.save(model=self.cb_model.get())
-        cmd = child_command("transcribe", target,
-                            "--model", self.cb_model.get(), "--threads", "4")
-        if self.outdir is not None:
-            cmd += ["--outdir", str(self.outdir)]
+        # --threads と --outdir は渡さない。config の値を transcribe 側に
+        # 解決させる（GUI が明示指定すると設定が常に迂回されるため）
+        cmd = child_command("transcribe", target, "--model", self.cb_model.get())
         if self.var_diarize.get():
             cmd.append("--diarize")
             if self.var_speakers.get() != "自動":

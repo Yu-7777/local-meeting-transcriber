@@ -18,6 +18,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import common
 from apppaths import FROZEN, ROOT
 
 NAME = "会議録音・文字起こし"
@@ -107,8 +108,7 @@ def main():
                     help="デスクトップにも作る（既定はスタートメニューのみ）")
     args = ap.parse_args()
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    common.use_utf8_stdout()
     try:
         made = create(desktop=args.desktop)
     except SystemExit as exc:

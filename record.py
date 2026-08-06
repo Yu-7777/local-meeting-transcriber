@@ -12,6 +12,7 @@ WASAPI ループバックで OS 側から音を取るため、Zoom / Google Meet
 """
 
 import argparse
+import ctypes
 import datetime as dt
 import json
 import queue
@@ -20,10 +21,15 @@ import sys
 import threading
 import time
 import wave
+from ctypes import wintypes
 from pathlib import Path
 
 import numpy as np
 import pyaudiowpatch as pyaudio
+
+import common
+import config
+from common import hhmmss
 
 CHUNK = 1024
 SAMPLE_WIDTH = 2  # paInt16
@@ -38,8 +44,6 @@ STAMP_RE = re.compile(r"^(\d{4}_\d{2}_\d{2}_\d{2}_\d{2}|\d{8}_\d{6})(?:_(.*))?$"
 # Windows のファイル名に使えない文字（: はドライブ区切りのため使えない）
 INVALID_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 MAX_NAME_LEN = 40
-
-import config  # noqa: E402
 
 
 def sanitize_name(name):
@@ -112,9 +116,6 @@ def move_to_trash(path):
     削除であり、そちらと同じ挙動にするのが最も驚きが少ないため。会議の録音は
     取り直しがきかないので、誤操作から戻せることも重要。
     """
-    import ctypes
-    from ctypes import wintypes
-
     FO_DELETE = 0x0003
     FOF_SILENT = 0x0004
     FOF_NOCONFIRMATION = 0x0010
@@ -292,16 +293,20 @@ class StreamRecorder:
         return self.frames_written / self.rate if self.rate else 0.0
 
 
+def level_db(level):
+    """RMS レベル (0..1) を dBFS にする。無音は -120dB 扱い."""
+    return 20 * np.log10(level) if level > 1e-6 else -120.0
+
+
+def level_ratio(level):
+    """メーターの伸び (0..1)。-60dB を下端とする."""
+    return float(np.clip((level_db(level) + 60.0) / 60.0, 0.0, 1.0))
+
+
 def bar(level, width=16):
-    """RMS(0..1) を dB スケールのバーにする."""
-    db = 20 * np.log10(level) if level > 1e-6 else -120.0
-    filled = int(np.clip((db + 60.0) / 60.0, 0.0, 1.0) * width)
-    return "█" * filled + "░" * (width - filled), db
-
-
-def hhmmss(sec):
-    sec = int(sec)
-    return f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
+    """RMS(0..1) を dB スケールのバーにする（CLI 表示用）."""
+    filled = int(level_ratio(level) * width)
+    return "█" * filled + "░" * (width - filled), level_db(level)
 
 
 def resolve_loopback(p, index):
@@ -471,8 +476,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=None, help="指定秒数で自動停止")
     args = ap.parse_args()
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    common.use_utf8_stdout()
 
     session = RecordingSession(args.mic, args.loopback, args.outdir, args.name)
     recorders = []
@@ -528,7 +532,7 @@ def main():
             print("  " + line)
         print("=" * 68)
         print(f"\n  保存先: {session.outdir}")
-        print("  文字起こし: .venv\\Scripts\\python.exe transcribe.py")
+        print(f"  文字起こし: {common.cli_hint('transcribe')}")
         return 0
     finally:
         session.close()
