@@ -45,7 +45,9 @@ def load():
     cfg = dict(DEFAULTS)
     try:
         saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):
+        # ValueError で JSON の構文エラーと、UTF-8 でないファイル
+        # (UnicodeDecodeError) の両方を受ける。OSError は不在・読めない場合。
         return cfg  # 無い・壊れている -> 既定値で続行する
     if isinstance(saved, dict):
         cfg.update(_known(saved))

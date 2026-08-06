@@ -104,7 +104,8 @@ def assign_speaker(start, end, turns):
 def label_segments(segments, turns, base_label):
     """文字起こしセグメントに話者ラベルを書き込み、実際に発言した話者数を返す.
 
-    sherpa のクラスタ番号は飛び番になるので、登場順に 1 から振り直す。
+    diarize() が短いクラスタを間引くため番号は飛び番になる。登場順に
+    1 から振り直して、利用者に見せる番号を詰める。
     ここに置いてあるのは、番号の振り直しが話者分離側の事情だから。
     """
     assigned = [assign_speaker(s["start"], s["end"], turns) for s in segments]

@@ -81,8 +81,10 @@ class App(ttk.Frame):
         self._build_transcribe_box()
         self._build_log_box()
 
-        # 列挙は WASAPI 初期化を伴い 0.3 秒ほどかかる。先に窓を出す
-        self.after(0, self.refresh_devices)
+        # 列挙は WASAPI 初期化を伴い、初回だけ 0.3 秒ほどかかる。窓を先に
+        # 出したいので後回しにする。after(0) だと窓が表示される前に走って
+        # しまう（実測: after(0) は winfo_ismapped()==0、after(1) 以降は 1）。
+        self.after(50, self.refresh_devices)
         self.refresh_recordings()
         self.after(100, self._drain_queue)
 
@@ -514,8 +516,8 @@ class App(ttk.Frame):
     def start_transcribe(self, target=None):
         """文字起こしを開始する。target 省略時は画面の選択に従う.
 
-        録音停止直後の自動実行では、一覧の更新を待たずに済むよう、
-        録音先を直接渡す。
+        録音停止直後の自動実行では、一覧の選択状態に左右されず、いま録った
+        ものを確実に対象にするため録音先を直接渡す。
         """
         if self.session is not None:
             messagebox.showwarning("録音中", "先に録音を停止してください。")
@@ -590,7 +592,8 @@ class App(ttk.Frame):
             self.log(f"エラーで終了しました (code {code})")
             messagebox.showerror("文字起こし失敗",
                                  "ログを確認してください。\n"
-                                 "モデル未取得の場合は setup.bat を実行してください。")
+                                 "モデルが未取得の場合は、GUI のモデル欄で"
+                                 "確認を進めるか setup.bat を実行してください。")
 
     # ------------------------------------------------------------------ 受信
     def _drain_queue(self):

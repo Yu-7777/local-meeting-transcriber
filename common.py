@@ -1,8 +1,12 @@
 """どのエントリポイントからも使う小物.
 
-ここに置くものは重い依存を持たないこと。特に pyaudiowpatch は署名のない
-ネイティブ DLL を読み込むため、音声を扱わない文字起こし経路へ持ち込まない
-（スマート アプリ コントロールに触れる面を増やさないため）。
+ここに置くものは重い依存を持たないこと。特に pyaudiowpatch は音声を扱わない
+文字起こし経路へ持ち込まない。
+
+理由は、pyaudiowpatch の _portaudiowpatch.pyd が署名なしで、スマート アプリ
+コントロールに引っかかる面を 1 つ増やすため。ただし同じ経路が読む
+ctranslate2 / av / onnxruntime / sherpa-onnx も署名なしなので、これで経路が
+署名なしから自由になるわけではない（増やさない、というだけ）。
 """
 
 import sys
@@ -24,9 +28,11 @@ def hhmmss(sec):
 
 
 def use_utf8_stdout():
-    """コンソールの文字化けを防ぐ。各 main() の先頭で呼ぶ.
+    """コンソールの文字化けを防ぐ。コンソールを使う main() の先頭で呼ぶ.
 
-    cp932 のままだとデバイス名の (R) などで UnicodeEncodeError になる。
+    cp932 のままだとデバイス名の (R) などで UnicodeEncodeError になる
+    （実際に「インテル(R) スマート・サウンド」の丸 R で落ちた）。
+    GUI は標準出力を使わないので呼んでいない。stderr は対象外。
     """
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

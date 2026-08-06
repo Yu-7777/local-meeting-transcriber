@@ -1,7 +1,8 @@
 """音声認識モデルを models/ に事前ダウンロードする.
 
-一度取得すれば以降は完全オフラインで動作する（HF_HUB_OFFLINE=1）。
-音声や文字起こし結果が外部に送信されることは一切ない。
+取得済みのモデルは transcribe 側が local_files_only で読むため、以降は
+ネットワークに触れない。音声や文字起こし結果が外部に送信されることは
+一切ない。
 """
 
 import argparse
@@ -109,7 +110,7 @@ def download(name):
 def main():
     ap = argparse.ArgumentParser(description="Whisper モデルを事前取得する")
     ap.add_argument("models", nargs="*", help="取得するモデル名")
-    ap.add_argument("--all", action="store_true", help="turbo と large-v3 の両方を取得")
+    ap.add_argument("--all", action="store_true", help="turbo・large-v3・話者分離モデルをまとめて取得")
     ap.add_argument("--diarization", action="store_true",
                     help="話者分離用モデルも取得する (約34MB)")
     args = ap.parse_args()

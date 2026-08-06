@@ -26,7 +26,8 @@ def main():
         try:
             wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
         except OSError:
-            print("WASAPI が利用できません。Windows 環境で実行してください。", file=sys.stderr)
+            print("WASAPI が利用できません。オーディオ ドライバの状態を"
+                  "確認してください。", file=sys.stderr)
             return 1
 
         default_out = wasapi["defaultOutputDevice"]

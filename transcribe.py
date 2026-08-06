@@ -47,7 +47,7 @@ def build_plan(target, outdir=None):
 
     受け付ける形:
       - 録音フォルダ (meta.json あり) -> 相手/自分の 2 本
-      - 単体の音声ファイル            -> 1 本のみ（話者ラベルなし）
+      - 単体の音声ファイル            -> 1 本のみ（相手/自分は付かない）
       - 省略                          -> 既定の保存先から最新の録音
     """
     target = Path(target) if target else latest_recording()
@@ -59,7 +59,8 @@ def build_plan(target, outdir=None):
             raise SystemExit(f"対応していない形式です: {target.suffix}")
         out = resolve_outdir(outdir, target.parent)
         out.mkdir(parents=True, exist_ok=True)
-        # 単体ファイルは誰の声か分からないので話者ラベルを付けない
+        # 単体ファイルは誰の声か分からないので 相手/自分 を付けない。
+        # --diarize を付けた場合は声質で分けた 話者N が付く
         return out, [(target, None, True)], {"single_file": True}, target.stem
 
     meta_path = target / "meta.json"
@@ -207,9 +208,13 @@ def main():
 
     import download_models
 
-    # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし始めると
-    # 固まったように見えるので、何が起きるか先に伝える。
-    if not download_models.is_downloaded(model_name):
+    # 取得済みなら常にローカルだけを見る。そうしないと faster-whisper が
+    # 毎回 HuggingFace へ更新確認に行き、「ネットワークを使うのは初回だけ」
+    # という前提が崩れる（音声は送られないが、通信は発生する）。
+    have_model = download_models.is_downloaded(model_name)
+    if not have_model:
+        # 既定のモデル以外は初回セットアップで取っていない。黙って数GB落とし
+        # 始めると固まったように見えるので、何が起きるか先に伝える。
         gb = download_models.model_size(model_name)
         size = f"約 {gb} GB" if gb else "数 GB"
         if args.offline:
@@ -231,7 +236,7 @@ def main():
         compute_type="int8",
         cpu_threads=threads,
         download_root=str(MODELS_DIR),
-        local_files_only=args.offline,
+        local_files_only=have_model or args.offline,
     )
     print(f"読み込み完了 ({time.perf_counter() - load_start:.1f}s)")
 

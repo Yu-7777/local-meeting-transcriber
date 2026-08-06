@@ -47,9 +47,13 @@ MAX_NAME_LEN = 40
 
 
 def sanitize_name(name):
-    """録音名をフォルダ名に使える形に整える。使えない場合は空文字を返す."""
+    """録音名をフォルダ名に使える形に整える.
+
+    使えない文字は _ に置き換える。全部落ちた場合だけ空文字を返す。
+    """
     cleaned = INVALID_CHARS.sub("_", str(name or "")).strip()
-    # 末尾のドットと空白は Windows が黙って落とすので、こちらで取り除く
+    # 先頭と末尾のドット・空白を落とす（末尾は Windows が黙って落とすため、
+    # こちらで取り除いておかないと意図しない名前になる）
     return cleaned[:MAX_NAME_LEN].strip(". ")
 
 
@@ -191,7 +195,7 @@ class StreamRecorder:
         return (None, pyaudio.paContinue)
 
     def _write_silence(self, frames):
-        """無音を frames サンプル分だけ書き込む."""
+        """無音を frames フレーム分だけ書き込む（1 フレーム = 全チャンネル分）."""
         frame_bytes = SAMPLE_WIDTH * self.channels
         block = b"\x00" * (CHUNK * frame_bytes)
         remaining = frames
@@ -221,7 +225,7 @@ class StreamRecorder:
             n_frames = len(chunk) // frame_bytes
             chunk_start = ts - n_frames / self.rate
 
-            # 本来この位置にあるべきサンプル数と、実際に書いた数を突き合わせる。
+            # 本来この位置にあるべきフレーム数と、実際に書いた数を突き合わせる。
             # WASAPI ループバックは何も再生されていない間データを返さないため、
             # 会議の沈黙中に穴が空く。そのぶんを無音で埋めて時間軸を保つ。
             expected = int(round((chunk_start - base_t0) * self.rate))
@@ -304,7 +308,7 @@ def level_ratio(level):
 
 
 def bar(level, width=16):
-    """RMS(0..1) を dB スケールのバーにする（CLI 表示用）."""
+    """RMS(0..1) から (バー文字列, dB) を返す（CLI 表示用）."""
     filled = int(level_ratio(level) * width)
     return "█" * filled + "░" * (width - filled), level_db(level)
 
