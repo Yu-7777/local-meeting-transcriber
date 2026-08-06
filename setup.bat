@@ -17,6 +17,13 @@ echo   Local meeting recorder / transcriber - setup
 echo ============================================================
 echo.
 
+rem Files extracted from a downloaded ZIP carry the "came from the web" mark,
+rem and Smart App Control refuses to launch marked .bat files. The user had to
+rem clear that mark on this file by hand to get here; clear it for the rest so
+rem gui.bat and record.bat work without the same manual step.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Get-ChildItem -LiteralPath '%~dp0' -Recurse -File | Unblock-File" > nul 2>&1
+
 echo [1/4] Looking for Python...
 call :find_python
 if defined PYEXE goto :have_python
