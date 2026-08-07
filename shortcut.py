@@ -84,7 +84,11 @@ def create(desktop=False):
              "-File", path],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            # setup.bat から呼ばれるので、返らないと導入手順全体が止まる
+            timeout=60,
         )
+    except subprocess.TimeoutExpired:
+        raise SystemExit("ショートカット作成 (PowerShell) が 60 秒で返りませんでした。")
     finally:
         Path(path).unlink(missing_ok=True)
 

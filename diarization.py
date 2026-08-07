@@ -10,6 +10,7 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 from collections import defaultdict
 
 import common
+import config
 from apppaths import MODELS_DIR
 
 SEG_MODEL = MODELS_DIR / "diarization" / "segmentation.onnx"
@@ -20,6 +21,8 @@ EMB_MODEL = MODELS_DIR / "diarization" / "embedding.onnx"
 DEFAULT_THRESHOLD = 0.9
 
 # BGM や音質変化が「話者」に化けて人数が膨らむのを防ぐ足切り。
+# 実会議 11 分では生クラスタ 11 個のうち 6 個が 2.5 秒未満で、本物の話者は
+# 5.3 秒以上だった。その谷に置いている（実測は README）。
 MIN_SPEAKER_SEC = 3.0
 
 
@@ -27,7 +30,7 @@ def models_available():
     return SEG_MODEL.exists() and EMB_MODEL.exists()
 
 
-def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
+def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=None,
             on_progress=None):
     """話者分離を行い (turns, stats) を返す.
 
@@ -36,13 +39,15 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
     import sherpa_onnx
     from faster_whisper.audio import decode_audio
 
+    threads = threads or config.load()["threads"]
+
     if not models_available():
         raise SystemExit(
             "話者分離モデルがありません。次を実行してください:\n"
             f"  {common.cli_hint('download', '--diarization')}"
         )
 
-    config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+    sd_config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
                 model=str(SEG_MODEL)
@@ -57,13 +62,14 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
             num_clusters=int(num_speakers) if num_speakers else -1,
             threshold=float(threshold),
         ),
+        # sherpa-onnx の既定値のまま（調整していない）
         min_duration_on=0.3,
         min_duration_off=0.5,
     )
-    if not config.validate():
+    if not sd_config.validate():
         raise SystemExit("話者分離の設定が不正です。モデルファイルを確認してください。")
 
-    sd = sherpa_onnx.OfflineSpeakerDiarization(config)
+    sd = sherpa_onnx.OfflineSpeakerDiarization(sd_config)
     audio = decode_audio(str(wav_path), sampling_rate=sd.sample_rate)
     result = sd.process(audio, callback=on_progress)
     del audio  # 1 時間で 230MB。Whisper のモデルと同時に抱えないよう早めに解放
@@ -87,7 +93,12 @@ def diarize(wav_path, num_speakers=None, threshold=DEFAULT_THRESHOLD, threads=8,
 
 
 def assign_speaker(start, end, turns):
-    """文字起こしセグメントに、最も重なりの大きい話者を割り当てる."""
+    """文字起こしセグメントに、最も重なりの大きい話者を割り当てる.
+
+    重なりの下限は設けない。Whisper は無音をまたいで区間の終端を伸ばすので
+    （実会議で最長 65.9 秒）、区間長に対する割合で足切りすると、時刻が
+    伸びただけの正しい区間からラベルを剥がしてしまう。
+    """
     best_speaker, best_overlap = None, 0.0
     for t_start, t_end, speaker in turns:
         overlap = min(end, t_end) - max(start, t_start)

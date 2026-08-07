@@ -27,6 +27,8 @@ import download_models
 from apppaths import ROOT, child_command
 
 MODELS = download_models.ALL_MODELS
+# 先頭が既定。自動判定は短い発話で外すことがあるので、既定にはしない
+LANGUAGES = {"日本語": "ja", "英語": "en", "自動判定": "auto"}
 FILE_LOCKED_HINT = "音声ファイルを開いているアプリがあれば閉じてください。"
 # 対応形式は common の定義から作る（片方だけ増えて選べなくなるのを防ぐ）
 AUDIO_TYPES = [("音声・動画ファイル",
@@ -40,9 +42,11 @@ def list_devices():
     try:
         wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
         try:
-            default_lb = p.get_default_wasapi_loopback()["index"]
-        except Exception:
-            default_lb = None
+            # 録音時と同じ手順で決める。GUI が独自に選ぶと ★既定 の表示と
+            # 実際に録音されるデバイスが食い違う
+            default_lb = record.resolve_loopback(p, None)["index"]
+        except (Exception, SystemExit):
+            default_lb = None  # 決められなくても一覧は出す（手で選べる）
         default_mic = wasapi["defaultInputDevice"]
 
         loopbacks, mics = [], []
@@ -198,8 +202,15 @@ class App(ttk.Frame):
         self.lbl_model.grid(row=3, column=1, sticky="e", padx=(0, 4))
         self._update_model_note()
 
+        # 言語が実際と違うと、Whisper は無理に翻訳せず幻聴を書き出す
+        ttk.Label(box, text="言語:").grid(row=4, column=0, sticky="w", pady=2)
+        self.cb_lang = ttk.Combobox(box, state="readonly", width=22,
+                                    values=list(LANGUAGES))
+        self.cb_lang.current(0)
+        self.cb_lang.grid(row=4, column=1, sticky="w", padx=(6, 4), pady=2)
+
         opt = ttk.Frame(box)
-        opt.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 2))
+        opt.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 2))
         self.var_diarize = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt, text="相手を話者ごとに分ける", variable=self.var_diarize,
                         command=self._toggle_speakers).grid(row=0, column=0, sticky="w")
@@ -211,7 +222,7 @@ class App(ttk.Frame):
         self.cb_speakers.grid(row=0, column=2, padx=4)
 
         run = ttk.Frame(box)
-        run.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        run.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         self.btn_transcribe = ttk.Button(run, text="文字起こしを実行", width=18,
                                          command=self.start_transcribe)
         self.btn_transcribe.grid(row=0, column=0)
@@ -531,7 +542,8 @@ class App(ttk.Frame):
         config.save(model=self.cb_model.get())
         # --threads と --outdir は渡さない。config の値を transcribe 側に
         # 解決させる（GUI が明示指定すると設定が常に迂回されるため）
-        cmd = child_command("transcribe", target, "--model", self.cb_model.get())
+        cmd = child_command("transcribe", target, "--model", self.cb_model.get(),
+                            "--language", LANGUAGES[self.cb_lang.get()])
         if self.var_diarize.get():
             cmd.append("--diarize")
             if self.var_speakers.get() != "自動":
@@ -645,9 +657,13 @@ def main():
     try:
         root = tk.Tk()
         root.title("会議録音・文字起こし (ローカル完結)")
-        root.geometry("720x800")
-        root.minsize(690, 770)
         app = App(root)
+        # 画面に収まる範囲で全体を出す。1366x768 のノート PC では 800 だと
+        # ログ欄が画面外に出て掴めなくなるため、高さは画面から決める。
+        root.update_idletasks()
+        root.geometry(f"720x{min(app.winfo_reqheight() + 24, root.winfo_screenheight() - 80)}")
+        # 縮めた分はログ欄が吸う（伸びる行はそこだけ）。操作部が隠れない下限。
+        root.minsize(690, 640)
         root.protocol("WM_DELETE_WINDOW", app.on_close)
         root.mainloop()
         return 0

@@ -78,11 +78,26 @@ def size_note(name):
     return f"未取得（{size_text(name)}）" if not is_downloaded(name) else ""
 
 
+# 接続が停滞したままだと setup.bat が無応答で止まるので上限を置く
+FETCH_TIMEOUT = 60
+
+
 def _fetch(url):
     """URL の中身を丸ごと取得して返す."""
     print(f"  {url.split('/')[-1]} を取得中...")
-    with urllib.request.urlopen(url) as r:
+    with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT) as r:
         return r.read()
+
+
+def _write_atomic(path, data):
+    """一時ファイルに書いてから置き換える.
+
+    途中で切れた場合に「存在するのに壊れている」ファイルを残さないため。
+    残ると exists() が真になり、以後ずっと取得済み扱いで話者分離が失敗する。
+    """
+    tmp = path.with_suffix(path.suffix + ".part")
+    tmp.write_bytes(data)
+    tmp.replace(path)
 
 
 def download_diarization():
@@ -95,12 +110,12 @@ def download_diarization():
         # 書庫で配られているので、中の model.onnx だけを取り出す
         with tarfile.open(fileobj=io.BytesIO(_fetch(SEG_URL)), mode="r:bz2") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("model.onnx"))
-            SEG_PATH.write_bytes(tar.extractfile(member).read())
+            _write_atomic(SEG_PATH, tar.extractfile(member).read())
 
     if EMB_PATH.exists():
         print("  話者埋め込みモデルは取得済み")
     else:
-        EMB_PATH.write_bytes(_fetch(EMB_URL))
+        _write_atomic(EMB_PATH, _fetch(EMB_URL))
 
     print(f"--- 話者分離モデル取得完了 ({DIA_DIR}) ---\n")
 

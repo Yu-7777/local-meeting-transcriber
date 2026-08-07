@@ -26,7 +26,13 @@ from common import hhmmss
 CHUNK = 1024
 SAMPLE_WIDTH = 2  # paInt16
 START_TIMEOUT = 10.0  # 全ストリームが動き出すのを待つ上限(秒)
-GAP_TOLERANCE = 0.15  # これを超える時間軸のズレを無音で埋める(秒)
+# これを超える時間軸のズレを無音で埋める(秒)。2 本の開始時刻は実測で 0.26〜0.36 秒
+# ずれるので、それを下回っていないと先頭が揃わない。上げる場合はここが上限
+# （実測は README「録音の同期について」）。
+GAP_TOLERANCE = 0.15
+# 書き出しスレッドの終了を待つ上限。キューは実時間より速く捌けるので、
+# 超えたら異常。超えた場合は黙って閉じず警告する（WAV が壊れるため）
+WRITER_JOIN_TIMEOUT = 30
 
 # 日時が先頭なのは、名前順に並べた時に時系列順になるため
 STAMP_FORMAT = "%Y_%m_%d_%H_%M"
@@ -162,6 +168,7 @@ class StreamRecorder:
         self.pad_sec = 0.0     # 開始遅延ぶんの先頭無音
         self.filled_sec = 0.0  # 途中の欠落を埋めた無音の合計
         self.overflows = 0
+        self.write_timed_out = False
         self.stream = None
         self._stop_time = None
         self._barrier = barrier
@@ -271,7 +278,12 @@ class StreamRecorder:
                 self.stream = None
         if self._thread is not None:
             self.queue.put(None)          # 番兵：残りを書き切ってから終了
-            self._thread.join(timeout=30)
+            self._thread.join(timeout=WRITER_JOIN_TIMEOUT)
+            if self._thread.is_alive():
+                # 書き込み中に WAV を閉じるとファイルが壊れる。黙って閉じない
+                self.write_timed_out = True
+                print(f"\n  ※ {self.label}: 書き出しが {WRITER_JOIN_TIMEOUT} 秒で"
+                      "終わりませんでした。末尾が欠けている可能性があります。")
             self._thread = None
         if self._wave is not None:
             self._wave.close()
@@ -420,6 +432,10 @@ class RecordingSession:
                 "start_delay_sec": round(r.pad_sec, 3),
                 "gap_filled_sec": round(r.filled_sec, 3),
                 "recorded_sec": round(r.recorded_sec, 3),
+                # 音が途切れた唯一の証拠。GUI 経由だとコンソールの警告が
+                # 流れて消えるので、後から確認できるよう残す
+                "overflows": r.overflows,
+                "write_timed_out": r.write_timed_out,
             }
         (self.outdir / "meta.json").write_text(
             json.dumps(self.meta, ensure_ascii=False, indent=2), encoding="utf-8"
