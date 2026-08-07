@@ -4,7 +4,7 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 自分の声は物理的に別ファイル(mic.wav)なので、ここでは相手側だけを扱えばよく、
 一般的な話者分離より条件が良い。
 
-精度の限界と num_speakers の使いどころは README「精度について正直な注意」。
+精度の限界と num_speakers の使いどころは CLI.md「精度について正直な注意」。
 """
 
 from collections import defaultdict
@@ -17,7 +17,7 @@ SEG_MODEL = MODELS_DIR / "diarization" / "segmentation.onnx"
 EMB_MODEL = MODELS_DIR / "diarization" / "embedding.onnx"
 
 # 音質差で同一人物の埋め込みが散るため、低い閾値だと同じ人が複数に割れる。
-# 統合寄りにしてある（掃引結果は README「チューニングの実測データ」）。
+# 統合寄りにしてある（掃引結果は CLI.md「チューニングの実測データ」）。
 DEFAULT_THRESHOLD = 0.9
 
 # BGM や音質変化が「話者」に化けて人数が膨らむのを防ぐ足切り。
