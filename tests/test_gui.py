@@ -94,6 +94,43 @@ class TestAppBuilds(unittest.TestCase):
         self.app.stop_polling()
         self.assertEqual(self.app._timers, {})
 
+    def test_tick_updates_meters_and_reschedules(self):
+        """録音中のメーター更新。録音時にしか走らないので明示的に通す."""
+        stub = types.SimpleNamespace(
+            elapsed=65.0, pending=[],
+            recorders=[types.SimpleNamespace(label="相手", level=0.5),
+                       types.SimpleNamespace(label="自分", level=0.0)])
+        self.app.session = stub
+        try:
+            self.app._tick()
+            self.assertEqual(self.app.lbl_time.cget("text"), "00:01:05")
+            self.assertGreater(self.app.meters["相手"][0]["value"], 0)
+            self.assertEqual(self.app.meters["自分"][0]["value"], 0)
+            self.assertIn("dB", self.app.meters["相手"][1].cget("text"))
+            # 次回の予約が入ること（入らないとメーターが止まる）
+            self.assertIn(self.app._tick, self.app._timers)
+        finally:
+            self.app.session = None
+
+    def test_tick_warns_while_a_stream_is_silent(self):
+        """片方が音を返さない時に気付けること（無音録音が最大の失敗）."""
+        stub = types.SimpleNamespace(
+            elapsed=1.0, pending=["自分"],
+            recorders=[types.SimpleNamespace(label="相手", level=0.1),
+                       types.SimpleNamespace(label="自分", level=0.0)])
+        self.app.session = stub
+        try:
+            self.app._tick()
+            self.assertIn("自分", self.app.lbl_state.cget("text"))
+        finally:
+            self.app.session = None
+
+    def test_tick_stops_when_session_ends(self):
+        self.app.session = None
+        self.app._timers.pop(self.app._tick, None)
+        self.app._tick()
+        self.assertNotIn(self.app._tick, self.app._timers)
+
     def test_device_enumeration_runs_after_window_shows(self):
         # after(50) で遅らせているので、タイマーが回るまで待つ
         self.root.after(400, self.root.quit)
