@@ -168,7 +168,6 @@ class StreamRecorder:
         self.pad_sec = 0.0     # 開始遅延ぶんの先頭無音
         self.filled_sec = 0.0  # 途中の欠落を埋めた無音の合計
         self.overflows = 0
-        self.write_timed_out = False
         self.stream = None
         self._stop_time = None
         self._barrier = barrier
@@ -281,7 +280,6 @@ class StreamRecorder:
             self._thread.join(timeout=WRITER_JOIN_TIMEOUT)
             if self._thread.is_alive():
                 # 書き込み中に WAV を閉じるとファイルが壊れる。黙って閉じない
-                self.write_timed_out = True
                 print(f"\n  ※ {self.label}: 書き出しが {WRITER_JOIN_TIMEOUT} 秒で"
                       "終わりませんでした。末尾が欠けている可能性があります。")
             self._thread = None
@@ -417,9 +415,6 @@ class RecordingSession:
         self.meta = {
             "started_at": self.started_at.isoformat(),
             "wall_duration_sec": round(self.wall_duration, 3),
-            # 2 本は無音を詰めて同一時間軸に揃えてある。読む側はこれを
-            # 前提にしていて分岐はしない（記録として残しているだけ）
-            "aligned": True,
             "streams": {},
         }
         for r in self.recorders:
@@ -435,7 +430,6 @@ class RecordingSession:
                 # 音が途切れた唯一の証拠。GUI 経由だとコンソールの警告が
                 # 流れて消えるので、後から確認できるよう残す
                 "overflows": r.overflows,
-                "write_timed_out": r.write_timed_out,
             }
         (self.outdir / "meta.json").write_text(
             json.dumps(self.meta, ensure_ascii=False, indent=2), encoding="utf-8"
