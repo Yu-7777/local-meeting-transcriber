@@ -168,6 +168,69 @@ def transcribe_stream(model, wav_path, label, language, beam_size):
     return results
 
 
+def announce(target, items, out_dir, model_name, threads):
+    """何をどこに出すのかを先に見せる（数十分かかるので確認できるように）."""
+    print("=" * 68)
+    print(f"  対象   : {target or '(最新の録音)'}")
+    for wav, label, _ in items:
+        print(f"           {wav.name}" + (f"  [{label}]" if label else ""))
+    print(f"  出力   : {out_dir}")
+    print(f"  モデル : {model_name} (CPU / int8 / {threads} threads)")
+    print("=" * 68)
+
+
+def load_model(model_name, threads, offline):
+    """モデルを読み込む.
+
+    取得済みなら必ずローカルだけを見る（毎回 Hub へ更新確認に行かせない）。
+    """
+    import download_models
+
+    have_model = download_models.is_downloaded(model_name)
+    if not have_model:
+        if offline:
+            raise SystemExit(
+                f"\n{model_name} はまだ取得していません"
+                f"（{download_models.size_text(model_name)}）。\n"
+                "--offline を外して実行するか、先に次を実行してください:\n"
+                f"  {common.cli_hint('download', model_name)}"
+            )
+        print(f"\n※ {model_name}: {download_models.download_notice(model_name)}")
+
+    from faster_whisper import WhisperModel
+
+    print("\nモデルを読み込んでいます...")
+    started = time.perf_counter()
+    model = WhisperModel(
+        model_name,
+        device="cpu",
+        # float32 の 2.2 倍速く、出力は約 95% 一致（実測は README）
+        compute_type="int8",
+        cpu_threads=threads,
+        download_root=str(MODELS_DIR),
+        local_files_only=have_model or offline,
+    )
+    print(f"読み込み完了 ({time.perf_counter() - started:.1f}s)")
+    return model
+
+
+def format_transcript(segments, meta, source_name, model_name):
+    """本文を組み立てて行のリストで返す（ファイルには触れない）."""
+    lines = ["# 会議文字起こし"]
+    if meta.get("single_file"):
+        lines.append(f"# 元ファイル : {source_name}")
+    else:
+        lines.append(f"# 録音日時 : {meta.get('started_at', '?')}")
+        lines.append(f"# 録音長   : {hhmmss(meta.get('wall_duration_sec', 0))}")
+    lines += [f"# モデル   : {model_name}", ""]
+
+    for s in segments:
+        speaker = s["speaker"]
+        lines.append(f"[{hhmmss(s['start'])}] "
+                     + (f"{speaker}: " if speaker else "") + s["text"])
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser(description="録音をローカルで文字起こしする")
     ap.add_argument("recording", nargs="?", type=Path, default=None,
@@ -196,44 +259,9 @@ def main():
     threads = args.threads or cfg["threads"]
 
     out_dir, items, meta, stem = build_plan(args.recording, args.outdir)
+    announce(args.recording, items, out_dir, model_name, threads)
 
-    print("=" * 68)
-    print(f"  対象   : {args.recording or '(最新の録音)'}")
-    for wav, label, _ in items:
-        print(f"           {wav.name}" + (f"  [{label}]" if label else ""))
-    print(f"  出力   : {out_dir}")
-    print(f"  モデル : {model_name} (CPU / int8 / {threads} threads)")
-    print("=" * 68)
-
-    import download_models
-
-    # 取得済みなら必ずローカルだけを見る（毎回 Hub へ更新確認に行かせない）
-    have_model = download_models.is_downloaded(model_name)
-    if not have_model:
-        # 黙って数 GB 落とし始めると固まったように見えるので先に伝える
-        if args.offline:
-            raise SystemExit(
-                f"\n{model_name} はまだ取得していません"
-                f"（{download_models.size_text(model_name)}）。\n"
-                "--offline を外して実行するか、先に次を実行してください:\n"
-                f"  {common.cli_hint('download', model_name)}"
-            )
-        print(f"\n※ {model_name}: {download_models.download_notice(model_name)}")
-
-    from faster_whisper import WhisperModel
-
-    print("\nモデルを読み込んでいます...")
-    load_start = time.perf_counter()
-    model = WhisperModel(
-        model_name,
-        device="cpu",
-        # float32 の 2.2 倍速く、出力は約 95% 一致（実測は README）
-        compute_type="int8",
-        cpu_threads=threads,
-        download_root=str(MODELS_DIR),
-        local_files_only=have_model or args.offline,
-    )
-    print(f"読み込み完了 ({time.perf_counter() - load_start:.1f}s)")
+    model = load_model(model_name, threads, args.offline)
 
     language = None if args.language == "auto" else args.language
 
@@ -257,20 +285,10 @@ def main():
 
     all_segments.sort(key=lambda s: s["start"])
 
-    prefix = f"{stem}_" if stem else ""
-    lines = ["# 会議文字起こし"]
-    if meta.get("single_file"):
-        lines.append(f"# 元ファイル : {items[0][0].name}")
-    else:
-        lines.append(f"# 録音日時 : {meta.get('started_at', '?')}")
-        lines.append(f"# 録音長   : {hhmmss(meta.get('wall_duration_sec', 0))}")
-    lines += [f"# モデル   : {model_name}", ""]
-
-    for s in all_segments:
-        speaker = s["speaker"]
-        lines.append(f"[{hhmmss(s['start'])}] "
-                     + (f"{speaker}: " if speaker else "") + s["text"])
-    transcript_path = out_dir / f"{prefix}transcript.txt"
+    lines = format_transcript(all_segments, meta, items[0][0].name, model_name)
+    # stem が付くのは録音フォルダの外に出す時だけ。付けないと録音ごとに
+    # 同名になって上書きし合う（build_plan 参照）
+    transcript_path = out_dir / (f"{stem}_transcript.txt" if stem else "transcript.txt")
     transcript_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     by_speaker = Counter(s["speaker"] or "(話者なし)" for s in all_segments)

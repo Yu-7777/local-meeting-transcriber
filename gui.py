@@ -27,6 +27,11 @@ import download_models
 from apppaths import ROOT, child_command
 
 MODELS = download_models.ALL_MODELS
+WIDTH = 720
+# 縮めた分はログ欄が吸う（伸びる行はそこだけ）。この高さでも操作部は隠れない。
+# 1366x768 のノート PC でタスクバーを除いた実領域に収まる値にしてある。
+MIN_WIDTH, MIN_HEIGHT = 690, 640
+TASKBAR_MARGIN = 80  # 画面高からこれを引いた高さまでしか広げない
 # 先頭が既定。自動判定は短い発話で外すことがあるので、既定にはしない
 LANGUAGES = {"日本語": "ja", "英語": "en", "自動判定": "auto"}
 FILE_LOCKED_HINT = "音声ファイルを開いているアプリがあれば閉じてください。"
@@ -34,6 +39,15 @@ FILE_LOCKED_HINT = "音声ファイルを開いているアプリがあれば閉
 AUDIO_TYPES = [("音声・動画ファイル",
                 " ".join(f"*{s}" for s in sorted(common.AUDIO_SUFFIXES))),
                ("すべてのファイル", "*.*")]
+
+
+def window_height(wanted, screen_height):
+    """起動時の窓の大きさを決める.
+
+    中身の要求どおりに開くと 1366x768 のノート PC では下がはみ出し、
+    ログ欄を掴めなくなる。画面に収まる範囲までに抑える。
+    """
+    return f"{WIDTH}x{max(MIN_HEIGHT, min(wanted + 24, screen_height - TASKBAR_MARGIN))}"
 
 
 def list_devices():
@@ -81,6 +95,8 @@ class App(ttk.Frame):
         self._recordings = []
         self._loopbacks = []
         self._mics = []
+        # 仕掛けた周期処理。窓を閉じたあとに走ると Tk がエラーを出すので取り消す
+        self._timers = {}
 
         self._build_record_box()
         self._build_transcribe_box()
@@ -88,9 +104,9 @@ class App(ttk.Frame):
 
         # 列挙は初回だけ 0.3 秒ほどかかるので窓を先に出す。after(0) では
         # まだ窓が表示されていないため 0 にしない。
-        self.after(50, self.refresh_devices)
+        self._schedule(50, self.refresh_devices)
         self.refresh_recordings()
-        self.after(100, self._drain_queue)
+        self._schedule(100, self._drain_queue)
 
     # ---------------------------------------------------------------- 録音
     def _build_record_box(self):
@@ -464,7 +480,7 @@ class App(ttk.Frame):
                 foreground="#c60")
         else:
             self.lbl_state.configure(text="録音中", foreground="#c00")
-        self.after(150, self._tick)
+        self._schedule(150, self._tick)
 
     def stop_record(self):
         session, self.session = self.session, None
@@ -604,6 +620,20 @@ class App(ttk.Frame):
                                  "確認を進めるか setup.bat を実行してください。")
 
     # ------------------------------------------------------------------ 受信
+    def _schedule(self, delay, func):
+        """after() を仕掛ける。控えは処理ごとに 1 件だけ持つ.
+
+        _drain_queue のように自分を再予約するものがあるので、履歴として
+        溜めると際限なく増える。同じ処理の予約は上書きする。
+        """
+        self._timers[func] = self.after(delay, func)
+
+    def stop_polling(self):
+        """仕掛けた周期処理を全部止める。窓を閉じたあとに走らせないため."""
+        for timer in self._timers.values():
+            self.after_cancel(timer)   # 発火済みの ID を渡しても無害
+        self._timers.clear()
+
     def _drain_queue(self):
         try:
             while True:
@@ -618,7 +648,7 @@ class App(ttk.Frame):
                     self._on_transcribe_done(payload)
         except queue.Empty:
             pass
-        self.after(100, self._drain_queue)
+        self._schedule(100, self._drain_queue)
 
     def on_close(self):
         if self.session is not None:
@@ -633,6 +663,7 @@ class App(ttk.Frame):
             if not messagebox.askokcancel("実行中", "文字起こしを中断して終了しますか?"):
                 return
             self.proc.terminate()
+        self.stop_polling()
         self.master.destroy()
 
 
@@ -646,12 +677,9 @@ def main():
         root = tk.Tk()
         root.title("会議録音・文字起こし (ローカル完結)")
         app = App(root)
-        # 画面に収まる範囲で全体を出す。1366x768 のノート PC では 800 だと
-        # ログ欄が画面外に出て掴めなくなるため、高さは画面から決める。
         root.update_idletasks()
-        root.geometry(f"720x{min(app.winfo_reqheight() + 24, root.winfo_screenheight() - 80)}")
-        # 縮めた分はログ欄が吸う（伸びる行はそこだけ）。操作部が隠れない下限。
-        root.minsize(690, 640)
+        root.geometry(window_height(app.winfo_reqheight(), root.winfo_screenheight()))
+        root.minsize(MIN_WIDTH, MIN_HEIGHT)
         root.protocol("WM_DELETE_WINDOW", app.on_close)
         root.mainloop()
         return 0

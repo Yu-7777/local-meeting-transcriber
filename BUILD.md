@@ -9,6 +9,29 @@
 
 `dist\MeetingTranscriber\` にフォルダ一式ができます。
 
+## テスト
+
+```
+.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
+数秒で終わります。**モデルも録音も要りません** — 必要な入力はテストが
+その場で作って消します（`tests/helpers.py`）。利用者の録音に依存させると
+その PC でしか動かないテストになるためです。
+
+| ファイル | 対象 |
+|---|---|
+| `tests/test_units.py` | 名前の整形・設定の読み書き・レベル計算・話者ラベル・モデル判定 |
+| `tests/test_transcribe.py` | 入出力の組み立て（どの WAV をどこにどの名前で出すか）と出力書式 |
+| `tests/test_gui.py` | 画面の組み立て、未取得モデルの経路、子プロセス出力の振り分け |
+
+過去に取りこぼした不具合はテストに落としてあります。
+
+- 未取得のモデルを選ぶと `AttributeError`（`pythonw` では画面に何も出ない）
+- Windows の `print()` が `
+` を出すため、ログが全部「進捗」に分類される
+- 録音フォルダの外に出すと、全部 `transcript.txt` になって上書きし合う
+
 ## 配布物の構成
 
 ```

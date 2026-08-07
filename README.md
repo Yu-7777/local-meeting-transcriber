@@ -549,6 +549,7 @@ shortcut.py        スタートメニューへの登録（--desktop でデスク
 common.py          各所から使う小物（時刻整形・録音一覧・実行方法の案内）
 setup.bat          初期セットアップ
 record.bat         録音のショートカット
+tests/             テスト一式（BUILD.md 参照。モデルも録音も不要）
 models/            Whisper モデル（初回取得後はオフラインで動作）
 recordings/        録音データ
 ```
