@@ -8,7 +8,7 @@ from apppaths import RECORDINGS_DIR, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 
-# 上限 8。P コアを使い切ると E コアを掴んで遅くなるため（実測は README）。
+# 上限 8。P コアを使い切ると E コアを掴んで遅くなるため（実測は BUILD.md）。
 # 測ったのは i7-1260P だけなので、速い CPU では config.json で上げてよい。
 DEFAULT_THREADS = min(8, os.cpu_count() or 4)  # or 4: cpu_count は稀に None
 

@@ -19,7 +19,7 @@ from apppaths import MODELS_DIR
 from common import AUDIO_SUFFIXES, hhmmss
 
 # VAD が捨てる無音の最短長。ライブラリ既定 2000 からの変更で、実測 4 時間ぶんの
-# 録音では 5.3% 多く無音を捨てられた（文字起こし結果はほぼ同一。README 参照）。
+# 録音では 5.3% 多く無音を捨てられた（文字起こし結果はほぼ同一。BUILD.md 参照）。
 MIN_SILENCE_MS = 500
 
 
@@ -209,7 +209,7 @@ def load_model(model_name, threads, offline):
     model = WhisperModel(
         model_name,
         device="cpu",
-        # float32 の 2.2 倍速く、出力は約 95% 一致（実測は README）
+        # float32 の 2.2 倍速く、出力は約 95% 一致（実測は BUILD.md）
         compute_type="int8",
         cpu_threads=threads,
         download_root=str(MODELS_DIR),
