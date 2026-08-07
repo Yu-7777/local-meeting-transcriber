@@ -47,44 +47,53 @@ class TestBuildPlan(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_recording_folder(self):
-        out, items, meta, stem = transcribe.build_plan(self.folder)
-        self.assertEqual(out, self.folder)
+        path, items, meta = transcribe.build_plan(self.folder)
+        self.assertEqual(path, self.folder / "transcript.txt")
         self.assertEqual([label for _, label, _ in items], ["相手", "自分"])
         # 話者分離をかけるのは相手だけ（自分は物理的に分かれている）
         self.assertEqual([d for _, _, d in items], [True, False])
-        self.assertIsNone(stem)
         self.assertEqual(meta["wall_duration_sec"], 0.1)
 
-    def test_prefix_added_when_written_elsewhere(self):
-        """別の場所に出す時は録音名を頭に付ける（付けないと全部 transcript.txt）."""
-        other = self.base / "議事録"
-        _, _, _, stem = transcribe.build_plan(self.folder, other)
-        self.assertEqual(stem, self.folder.name)
+    def test_elsewhere_gets_the_recording_name(self):
+        """別の場所に出す時は録音名を頭に付ける.
 
-    def test_no_prefix_when_written_in_place(self):
-        _, _, _, stem = transcribe.build_plan(self.folder, self.folder)
-        self.assertIsNone(stem)
+        付けないと録音ごとに transcript.txt になり、前の議事録を静かに潰す。
+        """
+        other = self.base / "議事録"
+        path, _, _ = transcribe.build_plan(self.folder, other)
+        self.assertEqual(path, other / f"{self.folder.name}_transcript.txt")
+
+    def test_two_recordings_do_not_collide(self):
+        other = self.base / "議事録"
+        second = helpers.make_recording(self.base, "2026_09_09_09_09")
+        first_path, _, _ = transcribe.build_plan(self.folder, other)
+        second_path, _, _ = transcribe.build_plan(second, other)
+        self.assertNotEqual(first_path, second_path)
+
+    def test_in_place_keeps_plain_name(self):
+        path, _, _ = transcribe.build_plan(self.folder, self.folder)
+        self.assertEqual(path.name, "transcript.txt")
 
     def test_missing_wav_is_skipped(self):
         (self.folder / "mic.wav").unlink()
-        _, items, _, _ = transcribe.build_plan(self.folder)
+        _, items, _ = transcribe.build_plan(self.folder)
         self.assertEqual([label for _, label, _ in items], ["相手"])
 
     def test_single_stream_recording(self):
         folder = helpers.make_recording(self.base, "2026_09_09_09_09", both=False)
-        _, items, _, _ = transcribe.build_plan(folder)
+        _, items, _ = transcribe.build_plan(folder)
         self.assertEqual(len(items), 1)
 
     def test_single_audio_file(self):
         wav = self.folder / "system.wav"
-        out, items, meta, stem = transcribe.build_plan(wav)
+        path, items, meta = transcribe.build_plan(wav)
         self.assertEqual(len(items), 1)
         # 誰の声か分からないので 相手/自分 を付けない
         self.assertIsNone(items[0][1])
         self.assertTrue(items[0][2])
         self.assertEqual(meta, {"single_file": True})
-        self.assertEqual(stem, "system")
-        self.assertEqual(out, wav.parent)
+        # 元のファイル名を残す（同じフォルダに複数置いても潰し合わない）
+        self.assertEqual(path, wav.parent / "system_transcript.txt")
 
     def test_unsupported_suffix(self):
         bad = self.base / "資料.pdf"
@@ -105,8 +114,8 @@ class TestBuildPlan(unittest.TestCase):
 
     def test_outdir_is_created(self):
         other = self.base / "作られる" / "深い場所"
-        out, _, _, _ = transcribe.build_plan(self.folder, other)
-        self.assertTrue(out.is_dir())
+        path, _, _ = transcribe.build_plan(self.folder, other)
+        self.assertTrue(path.parent.is_dir())
 
     def test_every_supported_suffix_is_accepted(self):
         import common

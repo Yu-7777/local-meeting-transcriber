@@ -41,7 +41,10 @@ def resolve_outdir(explicit, fallback):
 
 
 def build_plan(target, outdir=None):
-    """入力の指定から (出力先, [(wav, ラベル, 話者分離するか)], meta, 接頭辞) を組み立てる.
+    """入力の指定から (出力ファイル, [(wav, ラベル, 話者分離するか)], meta) を組み立てる.
+
+    出力先だけでなくファイル名まで here で決める。呼び出し側に「外に出す時は
+    接頭辞を付ける」を覚えさせると、忘れた時に静かに上書きが起きるため。
 
     受け付ける形:
       - 録音フォルダ (meta.json あり) -> 相手/自分の 2 本
@@ -59,7 +62,8 @@ def build_plan(target, outdir=None):
         out.mkdir(parents=True, exist_ok=True)
         # 単体ファイルは誰の声か分からないので 相手/自分 を付けない。
         # --diarize を付けた場合は声質で分けた 話者N が付く
-        return out, [(target, None, True)], {"single_file": True}, target.stem
+        return (out / f"{target.stem}_transcript.txt",
+                [(target, None, True)], {"single_file": True})
 
     meta_path = target / "meta.json"
     if not meta_path.exists():
@@ -84,7 +88,8 @@ def build_plan(target, outdir=None):
     # 録音フォルダの中に出すなら transcript.txt のままでよい。外に出す場合は
     # 録音ごとに同名になって上書きしてしまうので、録音フォルダ名を前に付ける。
     same_place = out.resolve() == target.resolve()
-    return out, items, meta, None if same_place else target.name
+    name = "transcript.txt" if same_place else f"{target.name}_transcript.txt"
+    return out / name, items, meta
 
 
 def run_diarization(wav_path, num_speakers, threads, threshold):
@@ -168,13 +173,13 @@ def transcribe_stream(model, wav_path, label, language, beam_size):
     return results
 
 
-def announce(target, items, out_dir, model_name, threads):
+def announce(target, items, out_path, model_name, threads):
     """何をどこに出すのかを先に見せる（数十分かかるので確認できるように）."""
     print("=" * 68)
     print(f"  対象   : {target or '(最新の録音)'}")
     for wav, label, _ in items:
         print(f"           {wav.name}" + (f"  [{label}]" if label else ""))
-    print(f"  出力   : {out_dir}")
+    print(f"  出力   : {out_path}")
     print(f"  モデル : {model_name} (CPU / int8 / {threads} threads)")
     print("=" * 68)
 
@@ -258,8 +263,8 @@ def main():
     model_name = args.model or cfg["model"]
     threads = args.threads or cfg["threads"]
 
-    out_dir, items, meta, stem = build_plan(args.recording, args.outdir)
-    announce(args.recording, items, out_dir, model_name, threads)
+    transcript_path, items, meta = build_plan(args.recording, args.outdir)
+    announce(args.recording, items, transcript_path, model_name, threads)
 
     model = load_model(model_name, threads, args.offline)
 
@@ -286,9 +291,6 @@ def main():
     all_segments.sort(key=lambda s: s["start"])
 
     lines = format_transcript(all_segments, meta, items[0][0].name, model_name)
-    # stem が付くのは録音フォルダの外に出す時だけ。付けないと録音ごとに
-    # 同名になって上書きし合う（build_plan 参照）
-    transcript_path = out_dir / (f"{stem}_transcript.txt" if stem else "transcript.txt")
     transcript_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     by_speaker = Counter(s["speaker"] or "(話者なし)" for s in all_segments)

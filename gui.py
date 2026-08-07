@@ -586,8 +586,6 @@ class App(ttk.Frame):
             if not ch:
                 break
             if ch == b"\r":
-                if saw_cr:      # \r が続いた = 直前のは単独の \r だった
-                    emit("progress")
                 saw_cr = True
                 continue
             if saw_cr:

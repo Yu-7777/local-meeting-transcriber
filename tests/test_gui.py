@@ -257,6 +257,21 @@ class TestOutputRouting(unittest.TestCase):
                                 "  出力: transcript.txt"])
         self.assertEqual(progress, ["  10.0%", "  50.0%"])
 
+    def test_consecutive_bare_cr(self):
+        """\r が続いても、直前の内容は進捗として 1 度だけ出ること.
+
+        以前はここに専用の分岐があったが、emit() が空行を捨てるため
+        分岐の有無で結果が変わらなかった（10 通りで確認済み）。
+        """
+        logs, progress = classify("abc\r\rdef\r\n".encode("utf-8"))
+        self.assertEqual(progress, ["abc"])
+        self.assertEqual(logs, ["def"])
+
+    def test_leading_and_trailing_cr(self):
+        logs, progress = classify("\r進捗\r".encode("utf-8"))
+        self.assertEqual(progress, ["進捗"])
+        self.assertEqual(logs, [])
+
     def test_unix_line_endings_still_work(self):
         logs, progress = classify(b"a\nb\n")
         self.assertEqual(logs, ["a", "b"])
