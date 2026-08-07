@@ -15,14 +15,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def write_wav(path, seconds=0.1, rate=48000, channels=2):
-    """無音の WAV を作る。中身は問わず、長さと形式だけ合っていればよい."""
+# 実機のループバックと同じ形式。中身は誰も読まないので長さは最小限
+RATE, CHANNELS, SECONDS = 48000, 2, 0.1
+
+
+def write_wav(path):
+    """無音の WAV を作る。形式だけ合っていればよい."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(channels)
+        w.setnchannels(CHANNELS)
         w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(struct.pack("<h", 0) * channels * int(rate * seconds))
+        w.setframerate(RATE)
+        w.writeframes(struct.pack("<h", 0) * CHANNELS * int(RATE * SECONDS))
 
 
 def make_recording(base, name="2026_01_02_03_04", both=True):
@@ -34,7 +38,7 @@ def make_recording(base, name="2026_01_02_03_04", both=True):
 
     for info in streams.values():
         write_wav(folder / info["file"])
-        info.update(device="テスト用", rate=48000, channels=2,
+        info.update(device="テスト用", rate=RATE, channels=CHANNELS,
                     start_delay_sec=0.0, gap_filled_sec=0.0,
                     recorded_sec=0.1, overflows=0)
 
@@ -47,9 +51,9 @@ def make_recording(base, name="2026_01_02_03_04", both=True):
 
 def make_model_dir(base, repo_id, downloaded=True):
     """HuggingFace のキャッシュ構造を模した空のモデル置き場を作る."""
-    snapshots = Path(base) / ("models--" + repo_id.replace("/", "--")) / "snapshots"
-    snap = snapshots / "0123456789abcdef"
+    snap = (Path(base) / ("models--" + repo_id.replace("/", "--"))
+            / "snapshots" / "0123456789abcdef")
     snap.mkdir(parents=True, exist_ok=True)
     if downloaded:
+        # 本体があるかどうかで「取得済み」を判定している（download_models 参照）
         (snap / "model.bin").write_bytes(b"dummy")
-    return Path(base)

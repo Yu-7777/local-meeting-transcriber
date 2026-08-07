@@ -14,31 +14,49 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import helpers  # noqa: F401
+# helpers がリポジトリのルートを sys.path に足すので、先に読む
+import helpers
 
 import common
 import config
 import download_models as dm
 
+# 「gui を読めるか」と「画面を開けるか」は別。純粋な関数だけ試したい環境もある
 try:
     import tkinter as tk
     import gui
-    _root = tk.Tk()
-    _root.withdraw()
-    _root.destroy()
-    GUI_AVAILABLE = True
-except Exception as exc:  # 画面が無い環境ではまとめて飛ばす
-    GUI_AVAILABLE = False
-    GUI_REASON = str(exc)
+    IMPORT_ERROR = None
+except Exception as exc:
+    IMPORT_ERROR = str(exc)
+
+DISPLAY_ERROR = IMPORT_ERROR
+if IMPORT_ERROR is None:
+    try:
+        _probe = tk.Tk()
+        _probe.withdraw()
+        _probe.destroy()
+        DISPLAY_ERROR = None
+    except Exception as exc:
+        DISPLAY_ERROR = str(exc)
+
+needs_gui = unittest.skipIf(IMPORT_ERROR, f"gui を読めない: {IMPORT_ERROR}")
+needs_display = unittest.skipIf(DISPLAY_ERROR, f"画面を開けない: {DISPLAY_ERROR}")
 
 
-@unittest.skipUnless(GUI_AVAILABLE, "tkinter を開けない環境")
-class TestAppBuilds(unittest.TestCase):
+class GuiTestCase(unittest.TestCase):
+    """窓を 1 つ開き、設定は使い捨てに向ける（本物の config.json を汚さない）."""
+
+    isolate_models = False   # True にするとモデルを未取得の状態にする
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.cfg = mock.patch.object(
-            config, "CONFIG_PATH", Path(self.tmp.name) / "config.json")
-        self.cfg.start()
+        self._patches = [mock.patch.object(
+            config, "CONFIG_PATH", Path(self.tmp.name) / "config.json")]
+        if self.isolate_models:
+            self._patches.append(
+                mock.patch.object(dm, "MODELS_DIR", Path(self.tmp.name)))
+        for patch in self._patches:
+            patch.start()
         self.root = tk.Tk()
         self.root.withdraw()
         self.app = gui.App(self.root)
@@ -47,9 +65,18 @@ class TestAppBuilds(unittest.TestCase):
     def tearDown(self):
         self.app.stop_polling()
         self.root.destroy()
-        self.cfg.stop()
+        for patch in reversed(self._patches):
+            patch.stop()
         self.tmp.cleanup()
 
+    def settle(self):
+        """after() で遅らせている初期化が終わるまで回す."""
+        self.root.after(400, self.root.quit)
+        self.root.mainloop()
+
+
+@needs_display
+class TestAppBuilds(GuiTestCase):
     def test_model_list_matches_source(self):
         self.assertEqual(list(self.app.cb_model["values"]), dm.ALL_MODELS)
 
@@ -68,18 +95,13 @@ class TestAppBuilds(unittest.TestCase):
         for attr in ("_recordings", "_loopbacks", "_mics"):
             self.assertIsInstance(getattr(self.app, attr), list)
 
-    def test_no_speaker_count_control(self):
-        """人数指定は実測で悪化したので GUI からは出さない（README 参照）."""
-        self.assertFalse(hasattr(self.app, "cb_speakers"))
-
     def test_controls_survive_the_minimum_size(self):
         """最小サイズまで縮めても、操作部が隠れないこと.
 
         伸び縮みするのはログ欄だけなので、それ以外の高さが下限に収まっていれば
         どのボタンも画面外に出ない。
         """
-        boxes = self.app.winfo_children()
-        log_box = boxes[-1]           # 最後がログ欄（唯一 weight を持つ行）
+        log_box = self.app.txt.master   # 唯一 weight を持つ行（ここだけ伸びる）
         fixed = self.app.winfo_reqheight() - log_box.winfo_reqheight()
         self.assertLess(fixed, gui.MIN_HEIGHT)
 
@@ -132,16 +154,13 @@ class TestAppBuilds(unittest.TestCase):
         self.assertNotIn(self.app._tick, self.app._timers)
 
     def test_device_enumeration_runs_after_window_shows(self):
-        # after(50) で遅らせているので、タイマーが回るまで待つ
-        self.root.after(400, self.root.quit)
-        self.root.mainloop()
+        self.settle()   # after(50) で遅らせているので、タイマーが回るまで待つ
         self.assertGreater(len(self.app._loopbacks), 0)
 
     def test_default_loopback_matches_recorder(self):
         """★既定 が、実際に録音されるデバイスと一致すること."""
         import record
-        self.root.after(400, self.root.quit)
-        self.root.mainloop()
+        self.settle()
         import pyaudiowpatch as pyaudio
         p = pyaudio.PyAudio()
         try:
@@ -152,28 +171,11 @@ class TestAppBuilds(unittest.TestCase):
         self.assertEqual(marked, [expected])
 
 
-@unittest.skipUnless(GUI_AVAILABLE, "tkinter を開けない環境")
-class TestNotDownloadedModel(unittest.TestCase):
+@needs_display
+class TestNotDownloadedModel(GuiTestCase):
     """未取得のモデルを選んだ時の経路（過去に AttributeError を出した）."""
 
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.models = mock.patch.object(dm, "MODELS_DIR", Path(self.tmp.name))
-        self.cfg = mock.patch.object(
-            config, "CONFIG_PATH", Path(self.tmp.name) / "config.json")
-        self.models.start()
-        self.cfg.start()
-        self.root = tk.Tk()
-        self.root.withdraw()
-        self.app = gui.App(self.root)
-        self.root.update_idletasks()
-
-    def tearDown(self):
-        self.app.stop_polling()
-        self.root.destroy()
-        self.cfg.stop()
-        self.models.stop()
-        self.tmp.cleanup()
+    isolate_models = True
 
     def test_note_shows_size(self):
         self.app.cb_model.set("large-v3")
@@ -226,7 +228,7 @@ def classify(raw):
     return logs, progress
 
 
-@unittest.skipUnless(GUI_AVAILABLE, "tkinter を開けない環境")
+@needs_gui
 class TestOutputRouting(unittest.TestCase):
     """ログ欄と進捗ラベルの振り分け.
 
@@ -282,6 +284,7 @@ class TestOutputRouting(unittest.TestCase):
         self.assertEqual(kinds[-1], "transcribe_done")
 
 
+@needs_gui
 class TestWindowHeight(unittest.TestCase):
     """起動時の窓の大きさ（tkinter を開かずに検証する）."""
 

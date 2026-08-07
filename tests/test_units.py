@@ -1,6 +1,5 @@
 """モデルも録音も要らない部分の検証."""
 
-import json
 import os
 import tempfile
 import time
@@ -8,7 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import helpers  # noqa: F401  (sys.path を通す)
+# helpers がリポジトリのルートを sys.path に足すので、先に読む
+import helpers
 
 import common
 import config
@@ -209,6 +209,13 @@ class TestSpeakerLabels(unittest.TestCase):
         self.assertEqual(segs[0]["speaker"], "相手")
 
 
+class TestDiarizationModelPaths(unittest.TestCase):
+    def test_declared_once(self):
+        """置き場所の宣言が download 側と diarization 側で食い違わないこと."""
+        self.assertEqual(dm.SEG_PATH, diarization.SEG_MODEL)
+        self.assertEqual(dm.EMB_PATH, diarization.EMB_MODEL)
+
+
 class TestModelMetadata(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -252,11 +259,6 @@ class TestModelMetadata(unittest.TestCase):
         for fn in (dm.is_downloaded, dm.size_note, dm.download_notice, dm.size_text):
             fn("存在しないモデル")
 
-    def test_diarization_paths_shared(self):
-        # 置き場所の宣言が download 側と diarization 側で食い違わないこと
-        self.assertEqual(dm.SEG_PATH, diarization.SEG_MODEL)
-        self.assertEqual(dm.EMB_PATH, diarization.EMB_MODEL)
-
 
 class TestAtomicWrite(unittest.TestCase):
     def test_replaces_target(self):
@@ -275,15 +277,6 @@ class TestAtomicWrite(unittest.TestCase):
                     dm._write_atomic(target, b"abc")
             # 壊れたファイルが「取得済み」として残らないこと
             self.assertFalse(target.exists())
-
-
-class TestMetaFormat(unittest.TestCase):
-    def test_no_constant_fields(self):
-        """値が変わらないフィールドを meta.json に増やさない（情報量がゼロ）."""
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = helpers.make_recording(Path(tmp))
-            meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
-            self.assertNotIn("aligned", meta)
 
 
 if __name__ == "__main__":

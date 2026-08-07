@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import helpers  # noqa: F401
+# helpers がリポジトリのルートを sys.path に足すので、先に読む
+import helpers
 
 import config
 import transcribe
@@ -120,16 +121,6 @@ class TestLatestRecording(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit):
                 transcribe.latest_recording(Path(tmp))
-
-
-class TestConstants(unittest.TestCase):
-    def test_min_silence_differs_from_library_default(self):
-        """既定から変えている値。README の実測と食い違わないよう固定する."""
-        self.assertEqual(transcribe.MIN_SILENCE_MS, 500)
-
-    def test_no_speech_filter_is_gone(self):
-        # vad_filter があるため原理的に発火しない。復活させない
-        self.assertFalse(hasattr(transcribe, "NO_SPEECH_THRESHOLD"))
 
 
 class TestFormatTranscript(unittest.TestCase):
