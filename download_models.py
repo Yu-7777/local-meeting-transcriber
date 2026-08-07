@@ -12,6 +12,7 @@ import tarfile
 import urllib.request
 
 import common
+import config
 import diarization
 from apppaths import MODELS_DIR
 
@@ -21,7 +22,6 @@ MODELS = {
     "large-v3": ("Systran/faster-whisper-large-v3", 2.9),
 }
 ALL_MODELS = list(MODELS)
-DEFAULT_MODEL = ALL_MODELS[0]
 
 SEG_URL = (
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
@@ -149,7 +149,7 @@ def main():
     elif want_diarization:
         targets = []  # --diarization 単独なら話者分離モデルだけ取る
     else:
-        targets = [DEFAULT_MODEL]
+        targets = [config.DEFAULTS["model"]]  # 既定は config が正本
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     for name in targets:

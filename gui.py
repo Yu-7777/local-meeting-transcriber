@@ -212,14 +212,8 @@ class App(ttk.Frame):
         opt = ttk.Frame(box)
         opt.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 2))
         self.var_diarize = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opt, text="相手を話者ごとに分ける", variable=self.var_diarize,
-                        command=self._toggle_speakers).grid(row=0, column=0, sticky="w")
-        ttk.Label(opt, text="  相手の人数:").grid(row=0, column=1, sticky="w")
-        self.var_speakers = tk.StringVar(value="自動")
-        self.cb_speakers = ttk.Combobox(
-            opt, state="disabled", width=6, textvariable=self.var_speakers,
-            values=["自動", "2", "3", "4", "5", "6", "7", "8"])
-        self.cb_speakers.grid(row=0, column=2, padx=4)
+        ttk.Checkbutton(opt, text="相手を話者ごとに分ける",
+                        variable=self.var_diarize).grid(row=0, column=0, sticky="w")
 
         run = ttk.Frame(box)
         run.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -407,10 +401,6 @@ class App(ttk.Frame):
             "モデルのダウンロード",
             f"{name} はまだ取得していません。\n\n{notice}\n\n続けますか?")
 
-    def _toggle_speakers(self):
-        self.cb_speakers.configure(
-            state="readonly" if self.var_diarize.get() else "disabled")
-
     def open_folder(self):
         """文字起こしの結果が出る場所を開く."""
         if self.outdir is not None:
@@ -546,8 +536,6 @@ class App(ttk.Frame):
                             "--language", LANGUAGES[self.cb_lang.get()])
         if self.var_diarize.get():
             cmd.append("--diarize")
-            if self.var_speakers.get() != "自動":
-                cmd += ["--speakers", self.var_speakers.get()]
 
         self.btn_transcribe.configure(state="disabled")
         self.btn_record.configure(state="disabled")
