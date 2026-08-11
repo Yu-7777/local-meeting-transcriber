@@ -7,7 +7,7 @@ import sys
 
 import pyaudiowpatch as pyaudio
 
-import common
+from . import common
 
 
 def fmt(info, mark=""):

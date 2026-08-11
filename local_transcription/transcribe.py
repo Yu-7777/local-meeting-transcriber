@@ -13,10 +13,10 @@ import time
 from collections import Counter
 from pathlib import Path
 
-import common
-import config
-from apppaths import MODELS_DIR
-from common import AUDIO_SUFFIXES, hhmmss
+from . import common
+from . import config
+from .apppaths import MODELS_DIR
+from .common import AUDIO_SUFFIXES, hhmmss
 
 # VAD が捨てる無音の最短長。ライブラリ既定 2000 からの変更で、実測 4 時間ぶんの
 # 録音では 5.3% 多く無音を捨てられた（文字起こし結果はほぼ同一。BUILD.md 参照）。

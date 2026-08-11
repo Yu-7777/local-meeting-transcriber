@@ -87,10 +87,10 @@ CPU で動きます。60 分の会議で 30 分〜1 時間かかります。
 
 ```
 rem スタートメニューのみ
-.venv\Scripts\python.exe shortcut.py
+.venv\Scripts\python.exe -m local_transcription.shortcut
 
 rem デスクトップにも置く
-.venv\Scripts\python.exe shortcut.py --desktop
+.venv\Scripts\python.exe -m local_transcription.shortcut --desktop
 ```
 
 デスクトップのアイコンが不要になったら普通に削除するだけです。

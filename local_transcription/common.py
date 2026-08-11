@@ -7,8 +7,8 @@
 import sys
 from pathlib import Path
 
-import config
-from apppaths import FROZEN
+from . import config
+from .apppaths import FROZEN
 
 # 単体ファイル指定で受け付ける拡張子。GUI のファイル選択もここから作る
 AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma",

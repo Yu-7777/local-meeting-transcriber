@@ -19,12 +19,12 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import pyaudiowpatch as pyaudio
 
-import config
-import record
+from . import config
+from . import record
 
-import common
-import download_models
-from apppaths import ROOT, child_command
+from . import common
+from . import download_models
+from .apppaths import ROOT, child_command
 
 MODELS = download_models.ALL_MODELS
 WIDTH = 720

@@ -12,8 +12,8 @@ from unittest import mock
 # helpers がリポジトリのルートを sys.path に足すので、先に読む
 import helpers
 
-import config
-import transcribe
+from local_transcription import config
+from local_transcription import transcribe
 
 
 class TestResolveOutdir(unittest.TestCase):
@@ -118,7 +118,7 @@ class TestBuildPlan(unittest.TestCase):
         self.assertTrue(path.parent.is_dir())
 
     def test_every_supported_suffix_is_accepted(self):
-        import common
+        from local_transcription import common
         for suffix in common.AUDIO_SUFFIXES:
             path = self.base / f"音声{suffix}"
             path.write_bytes(b"x")

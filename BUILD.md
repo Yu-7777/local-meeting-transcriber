@@ -205,26 +205,30 @@ Python 本体には **PSF の署名**が付いており、スマート アプリ
 ## 構成
 
 ```
-LICENSE              MIT ライセンス
-app.py               サブコマンドの振り分け（GUI もここから呼ばれる）
-apppaths.py          実行形態（ソース / exe）によらないパス解決
-config.py            設定の読み書き（config.json）
-gui.py / gui.bat     簡易 GUI（録音と文字起こしの実行のみ。結果はファイル出力）
-record.py            2 ストリーム同時録音 → system.wav / mic.wav / meta.json
-transcribe.py        文字起こし → transcript.txt
-diarization.py       相手チャンネルの話者分離 (sherpa-onnx / --diarize 時のみ)
-check_devices.py     WASAPI デバイス一覧
-download_models.py   モデル事前取得
-shortcut.py          スタートメニューへの登録（--desktop でデスクトップにも）
-common.py            各所から使う小物（時刻整形・録音一覧・実行方法の案内）
-setup.bat            初期セットアップ
-record.bat           録音のショートカット
-build.spec           PyInstaller のビルド定義
-requirements.txt     依存パッケージ（推移的な依存まですべてバージョン固定）
-requirements-dev.txt ビルド用（PyInstaller）
-tests/               テスト一式（本文「テスト」節を参照。モデルも録音も不要）
-models/              Whisper モデル（初回取得後はオフラインで動作）
-recordings/          録音データ
+LICENSE                            MIT ライセンス
+app.py                             PyInstaller 用の薄いエントリスタブ
+local_transcription/
+    __init__.py
+    app.py                         サブコマンドの振り分け（GUI もここから呼ばれる）
+    apppaths.py                    実行形態（ソース / exe）によらないパス解決
+    config.py                      設定の読み書き（config.json）
+    gui.py                         簡易 GUI（録音と文字起こしの実行のみ。結果はファイル出力）
+    record.py                      2 ストリーム同時録音 → system.wav / mic.wav / meta.json
+    transcribe.py                  文字起こし → transcript.txt
+    diarization.py                 相手チャンネルの話者分離 (sherpa-onnx / --diarize 時のみ)
+    check_devices.py               WASAPI デバイス一覧
+    download_models.py             モデル事前取得
+    shortcut.py                    スタートメニューへの登録（--desktop でデスクトップにも）
+    common.py                      各所から使う小物（時刻整形・録音一覧・実行方法の案内）
+gui.bat                            GUI 起動
+setup.bat                          初期セットアップ
+record.bat                         録音のショートカット
+build.spec                         PyInstaller のビルド定義
+requirements.txt                   依存パッケージ（推移的な依存まですべてバージョン固定）
+requirements-dev.txt               ビルド用（PyInstaller）
+tests/                             テスト一式（本文「テスト」節を参照。モデルも録音も不要）
+models/                            Whisper モデル（初回取得後はオフラインで動作）
+recordings/                        録音データ
 ```
 
 ## ビルド

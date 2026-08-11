@@ -10,11 +10,11 @@ from unittest import mock
 # helpers がリポジトリのルートを sys.path に足すので、先に読む
 import helpers
 
-import common
-import config
-import diarization
-import download_models as dm
-import record
+from local_transcription import common
+from local_transcription import config
+from local_transcription import diarization
+from local_transcription import download_models as dm
+from local_transcription import record
 
 
 class TestHhmmss(unittest.TestCase):

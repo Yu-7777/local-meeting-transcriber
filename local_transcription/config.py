@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from apppaths import RECORDINGS_DIR, ROOT
+from .apppaths import RECORDINGS_DIR, ROOT
 
 CONFIG_PATH = ROOT / "config.json"
 

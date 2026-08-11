@@ -11,8 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-import common
-from apppaths import FROZEN, ROOT
+from . import common
+from .apppaths import FROZEN, ROOT
 
 NAME = "会議録音・文字起こし"
 
@@ -54,7 +54,7 @@ def targets():
         exe = Path(sys.executable)
         return exe, "", ROOT, exe
     pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
-    return pythonw, str(ROOT / "gui.py"), ROOT, pythonw
+    return pythonw, "-m local_transcription.gui", ROOT, pythonw
 
 
 def create(desktop=False):

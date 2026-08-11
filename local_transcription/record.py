@@ -19,9 +19,9 @@ from pathlib import Path
 import numpy as np
 import pyaudiowpatch as pyaudio
 
-import common
-import config
-from common import hhmmss
+from . import common
+from . import config
+from .common import hhmmss
 
 CHUNK = 1024
 SAMPLE_WIDTH = 2  # paInt16

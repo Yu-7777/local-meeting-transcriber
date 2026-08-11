@@ -11,10 +11,10 @@ import sys
 import tarfile
 import urllib.request
 
-import common
-import config
-import diarization
-from apppaths import MODELS_DIR
+from . import common
+from . import config
+from . import diarization
+from .apppaths import MODELS_DIR
 
 # モデルの正本。名前を増やす時はここだけ直す
 MODELS = {

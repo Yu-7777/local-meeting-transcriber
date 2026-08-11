@@ -26,7 +26,7 @@ record.bat
 または明示的にデバイスを指定する場合:
 
 ```
-.venv\Scripts\python.exe record.py --mic 24
+.venv\Scripts\python.exe -m local_transcription.record --mic 24
 ```
 
 録音中はレベルメーターが表示されます。停止は **Enter キー**（Ctrl+C でも可）。
@@ -62,20 +62,20 @@ record.bat
 録音とは別に、後から実行します（CPU 処理のため時間がかかります）。
 
 ```
-.venv\Scripts\python.exe transcribe.py
+.venv\Scripts\python.exe -m local_transcription.transcribe
 ```
 
 引数なしで**最新の録音**を処理します。対象は自由に指定できます。
 
 ```
 rem 特定の録音フォルダ
-.venv\Scripts\python.exe transcribe.py recordings\2026_08_05_14_30_定例MTG
+.venv\Scripts\python.exe -m local_transcription.transcribe recordings\2026_08_05_14_30_定例MTG
 
 rem 手元の音声ファイルを直接（IC レコーダーの録音なども可）
-.venv\Scripts\python.exe transcribe.py "D:\会議\打ち合わせ.mp3"
+.venv\Scripts\python.exe -m local_transcription.transcribe "D:\会議\打ち合わせ.mp3"
 
 rem 出力先を分ける
-.venv\Scripts\python.exe transcribe.py "D:\会議\打ち合わせ.mp3" --outdir "D:\議事録"
+.venv\Scripts\python.exe -m local_transcription.transcribe "D:\会議\打ち合わせ.mp3" --outdir "D:\議事録"
 ```
 
 対応形式は wav / mp3 / m4a / flac / ogg / aac / wma と、mp4 / mkv / webm / mov
@@ -131,7 +131,7 @@ GUI では「音声ファイルを選ぶ...」ボタンから同じことがで�
 `--diarize` を付けると、相手チャンネルを声質で話者ごとに分けます。
 
 ```
-.venv\Scripts\python.exe transcribe.py --diarize --speakers 3
+.venv\Scripts\python.exe -m local_transcription.transcribe --diarize --speakers 3
 ```
 
 ```
@@ -179,5 +179,5 @@ GUI では「音声ファイルを選ぶ...」ボタンから同じことがで�
 `large-v3`（2.9GB）を先に取得しておく場合:
 
 ```
-.venv\Scripts\python.exe download_models.py large-v3
+.venv\Scripts\python.exe -m local_transcription.download_models large-v3
 ```

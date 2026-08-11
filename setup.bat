@@ -66,16 +66,16 @@ if errorlevel 1 goto :fail
 
 rem Only the default model is fetched here. The higher accuracy model
 rem (large-v3, 2.9 GB) is downloaded on demand the first time it is picked,
-rem so first-time setup stays small. Sizes live in download_models.py.
+rem so first-time setup stays small. Sizes live in local_transcription/download_models.py.
 echo.
 echo [4/4] Downloading the speech model (about 1.6 GB, this takes a while)...
-".venv\Scripts\python.exe" "download_models.py" large-v3-turbo --diarization
+".venv\Scripts\python.exe" -m local_transcription.download_models large-v3-turbo --diarization
 if errorlevel 1 (
     echo.
     echo First attempt failed. This is often a temporary block by
     echo Smart App Control. Retrying once...
     echo.
-    ".venv\Scripts\python.exe" "download_models.py" large-v3-turbo --diarization
+    ".venv\Scripts\python.exe" -m local_transcription.download_models large-v3-turbo --diarization
     if errorlevel 1 goto :fail
 )
 
@@ -85,14 +85,14 @@ rem matter of taste, so ask instead of forcing one. /t 15 /d N keeps this
 rem from hanging when setup runs unattended. Failing here does not fail setup.
 echo.
 echo Adding to the Start menu...
-".venv\Scripts\python.exe" "shortcut.py"
+".venv\Scripts\python.exe" -m local_transcription.shortcut
 
 echo.
 choice /c YN /n /t 15 /d N /m "Put a shortcut on the desktop too? [Y/N] (No in 15s) "
 if errorlevel 2 (
-    echo   Start menu only. Run "shortcut.py --desktop" later if you change your mind.
+    echo   Start menu only. Run "python -m local_transcription.shortcut --desktop" later if you change your mind.
 ) else (
-    ".venv\Scripts\python.exe" "shortcut.py" --desktop
+    ".venv\Scripts\python.exe" -m local_transcription.shortcut --desktop
 )
 
 echo.
@@ -104,9 +104,9 @@ echo   To start: press the Windows key and type the tool name.
 echo   Double-clicking gui.bat also works.
 echo.
 echo   Command line:
-echo     .venv\Scripts\python.exe check_devices.py
+echo     .venv\Scripts\python.exe -m local_transcription.check_devices
 echo     record.bat
-echo     .venv\Scripts\python.exe transcribe.py
+echo     .venv\Scripts\python.exe -m local_transcription.transcribe
 echo.
 pause
 exit /b 0

@@ -14,10 +14,10 @@ from unittest import mock
 # helpers がリポジトリのルートを sys.path に足すので、先に読む
 import helpers
 
-import app
-import apppaths
-import record
-import shortcut
+from local_transcription import app
+from local_transcription import apppaths
+from local_transcription import record
+from local_transcription import shortcut
 
 
 class TestDispatch(unittest.TestCase):
@@ -33,8 +33,9 @@ class TestDispatch(unittest.TestCase):
                 called["argv"] = list(sys.argv)
                 return 0
 
-        def fake_import(name):
+        def fake_import(name, package=None):
             called["module"] = name
+            called["package"] = package
             return FakeModule
 
         with mock.patch.object(sys, "argv", ["app.py", *argv]), \
@@ -46,7 +47,8 @@ class TestDispatch(unittest.TestCase):
         for sub, module in app.COMMANDS.items():
             with self.subTest(sub=sub):
                 _, called = self.run_main([sub])
-                self.assertEqual(called["module"], module)
+                self.assertEqual(called["module"], f".{module}")
+                self.assertEqual(called["package"], "local_transcription")
 
     def test_arguments_are_forwarded_without_the_subcommand(self):
         # 子側は argparse で読むので、サブコマンド名が残っていると誤解する
@@ -55,18 +57,21 @@ class TestDispatch(unittest.TestCase):
 
     def test_no_argument_opens_the_gui(self):
         with mock.patch.object(sys, "argv", ["app.py"]), \
-             mock.patch.dict(sys.modules, {"gui": mock.Mock(main=lambda: 7)}):
+             mock.patch.dict(sys.modules,
+                              {"local_transcription.gui": mock.Mock(main=lambda: 7)}):
             self.assertEqual(app.main(), 7)
 
     def test_unknown_subcommand_opens_the_gui(self):
         """知らない語で黙って別のことをしない（以前は download に落ちていた）."""
         with mock.patch.object(sys, "argv", ["app.py", "しらない語"]), \
-             mock.patch.dict(sys.modules, {"gui": mock.Mock(main=lambda: 7)}):
+             mock.patch.dict(sys.modules,
+                              {"local_transcription.gui": mock.Mock(main=lambda: 7)}):
             self.assertEqual(app.main(), 7)
 
     def test_commands_point_at_real_modules(self):
         for module in app.COMMANDS.values():
-            self.assertTrue((helpers.ROOT / f"{module}.py").exists(), module)
+            self.assertTrue(
+                (helpers.ROOT / "local_transcription" / f"{module}.py").exists(), module)
 
 
 class TestChildCommand(unittest.TestCase):
@@ -102,7 +107,7 @@ class TestShortcutTargets(unittest.TestCase):
             exe, args, cwd, icon = shortcut.targets()
         # pythonw なら黒いコンソールが出ない
         self.assertEqual(exe.name, "pythonw.exe")
-        self.assertTrue(args.endswith("gui.py"))
+        self.assertEqual(args, "-m local_transcription.gui")
         self.assertEqual(cwd, shortcut.ROOT)
 
     def test_frozen_targets_use_the_exe_itself(self):

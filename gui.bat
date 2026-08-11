@@ -10,4 +10,4 @@ if not exist ".venv\Scripts\pythonw.exe" (
     exit /b 1
 )
 
-start "" ".venv\Scripts\pythonw.exe" "gui.py"
+start "" ".venv\Scripts\pythonw.exe" -m local_transcription.gui

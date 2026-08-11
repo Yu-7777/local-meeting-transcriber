@@ -15,9 +15,12 @@ for pkg in ("ctranslate2", "onnxruntime", "sherpa_onnx", "av", "pyaudiowpatch",
 # faster-whisper は Silero VAD の onnx をパッケージ内に持っているので必須
 datas += collect_data_files("faster_whisper")
 
-hiddenimports += ["faster_whisper", "diarization", "transcribe", "record",
-                  "check_devices", "download_models", "gui", "apppaths", "config",
-                  "common", "shortcut"]
+hiddenimports += ["faster_whisper", "local_transcription", "local_transcription.diarization",
+                  "local_transcription.transcribe", "local_transcription.record",
+                  "local_transcription.check_devices", "local_transcription.download_models",
+                  "local_transcription.gui", "local_transcription.apppaths",
+                  "local_transcription.config", "local_transcription.common",
+                  "local_transcription.shortcut"]
 
 a = Analysis(
     ["app.py"],

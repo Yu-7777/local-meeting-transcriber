@@ -9,9 +9,9 @@ sherpa-onnx (ONNX Runtime) を使うため PyTorch もアクセストークン�
 
 from collections import defaultdict
 
-import common
-import config
-from apppaths import MODELS_DIR
+from . import common
+from . import config
+from .apppaths import MODELS_DIR
 
 SEG_MODEL = MODELS_DIR / "diarization" / "segmentation.onnx"
 EMB_MODEL = MODELS_DIR / "diarization" / "embedding.onnx"

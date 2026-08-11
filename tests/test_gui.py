@@ -17,14 +17,14 @@ from unittest import mock
 # helpers がリポジトリのルートを sys.path に足すので、先に読む
 import helpers
 
-import common
-import config
-import download_models as dm
+from local_transcription import common
+from local_transcription import config
+from local_transcription import download_models as dm
 
 # 「gui を読めるか」と「画面を開けるか」は別。純粋な関数だけ試したい環境もある
 try:
     import tkinter as tk
-    import gui
+    from local_transcription import gui
     IMPORT_ERROR = None
 except Exception as exc:
     IMPORT_ERROR = str(exc)
@@ -159,7 +159,7 @@ class TestAppBuilds(GuiTestCase):
 
     def test_default_loopback_matches_recorder(self):
         """★既定 が、実際に録音されるデバイスと一致すること."""
-        import record
+        from local_transcription import record
         self.settle()
         import pyaudiowpatch as pyaudio
         p = pyaudio.PyAudio()

@@ -9,7 +9,7 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-".venv\Scripts\python.exe" "record.py" %*
+".venv\Scripts\python.exe" -m local_transcription.record %*
 
 echo.
 pause
