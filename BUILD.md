@@ -220,6 +220,7 @@ local_transcription/
     download_models.py             モデル事前取得
     shortcut.py                    スタートメニューへの登録（--desktop でデスクトップにも）
     common.py                      各所から使う小物（時刻整形・録音一覧・実行方法の案内）
+    device_watch.py                音声デバイスの着脱・既定変更をイベント駆動で監視 (GUI 用)
 gui.bat                            GUI 起動
 setup.bat                          初期セットアップ
 record.bat                         録音のショートカット

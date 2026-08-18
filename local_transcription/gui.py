@@ -13,6 +13,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -23,8 +24,12 @@ from . import config
 from . import record
 
 from . import common
+from . import device_watch
 from . import download_models
 from .apppaths import ROOT, child_command
+
+# デバイス変更通知が連続で来た時に、更新やログ出力を間引く間隔（秒）
+DEVICE_CHANGE_DEBOUNCE_SEC = 1.5
 
 MODELS = download_models.ALL_MODELS
 WIDTH = 720
@@ -97,6 +102,8 @@ class App(ttk.Frame):
         self._mics = []
         # 仕掛けた周期処理。窓を閉じたあとに走ると Tk がエラーを出すので取り消す
         self._timers = {}
+        self._last_device_change = 0.0
+        self._device_change_during_recording = False
 
         self._build_record_box()
         self._build_transcribe_box()
@@ -107,6 +114,19 @@ class App(ttk.Frame):
         self._schedule(50, self.refresh_devices)
         self.refresh_recordings()
         self._schedule(100, self._drain_queue)
+        self._start_device_watch()
+
+    def _start_device_watch(self):
+        """音声デバイスの着脱・既定変更を検知する（失敗しても致命的ではない）.
+
+        「更新」ボタンでの手動更新は残るので、ここが使えない環境でも困らない。
+        """
+        try:
+            watcher = device_watch.DeviceWatcher(
+                lambda: self.msg_queue.put(("device_changed", None)))
+            watcher.start()
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- 録音
     def _build_record_box(self):
@@ -460,6 +480,7 @@ class App(ttk.Frame):
         self.btn_record.configure(text="■ 停止")
         self.lbl_state.configure(text="録音中", foreground="#c00")
         self.btn_transcribe.configure(state="disabled")
+        self._device_change_during_recording = False
         self.log(f"録音開始: {self.session.outdir.name}")
         self.log("  両方のメーターが振れているか確認してください。")
         self._tick()
@@ -478,6 +499,9 @@ class App(ttk.Frame):
             self.lbl_state.configure(
                 text="録音中 (" + "/".join(pending) + " が応答待ち。マイクの許可を確認)",
                 foreground="#c60")
+        elif self._device_change_during_recording:
+            self.lbl_state.configure(text="録音中 (※ デバイス構成が変化。ログ参照)",
+                                     foreground="#c60")
         else:
             self.lbl_state.configure(text="録音中", foreground="#c00")
         self._schedule(150, self._tick)
@@ -644,9 +668,33 @@ class App(ttk.Frame):
                     self._on_record_done(payload)
                 elif kind == "transcribe_done":
                     self._on_transcribe_done(payload)
+                elif kind == "device_changed":
+                    self._on_device_changed()
         except queue.Empty:
             pass
         self._schedule(100, self._drain_queue)
+
+    def _on_device_changed(self):
+        """音声デバイスの着脱・既定変更を検知した時の処理.
+
+        録音中はストリームを触らない（同期がズレるため。README 参照）。
+        警告を出すだけにとどめ、切り替えは利用者に任せる。
+        """
+        now = time.monotonic()
+        if now - self._last_device_change < DEVICE_CHANGE_DEBOUNCE_SEC:
+            return  # 1 回の抜き差しで複数のイベントが連続するので間引く
+        self._last_device_change = now
+
+        if self.session is not None:
+            self._device_change_during_recording = True
+            self.log("  ※ 音声デバイスの構成が変わりました（この録音の切り替えは行いません）。"
+                     "メーターが両方とも振れているか確認してください。")
+            return
+
+        prev = (self.cb_loopback.get(), self.cb_mic.get())
+        self.refresh_devices()
+        if (self.cb_loopback.get(), self.cb_mic.get()) != prev:
+            self.log("  ※ 音声デバイスの構成が変わったため、一覧を更新しました。")
 
     def on_close(self):
         if self.session is not None:

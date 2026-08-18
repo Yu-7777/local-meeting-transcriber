@@ -13,6 +13,8 @@
 
 # --- 直接使うもの ---
 PyAudioWPatch==0.2.12.8   # WASAPI ループバック録音
+comtypes==1.4.16          # 音声デバイスの着脱通知 (Core Audio)。ネイティブ DLL を
+                          # 同梱しない純 Python パッケージなので SAC の対象外
 faster-whisper==1.2.1     # 文字起こし (CTranslate2)
 sherpa-onnx==1.13.2       # 話者分離。1.13.4 は SAC にブロックされた
 av==17.0.0                # 音声デコード。18.0.0 は SAC にブロックされた

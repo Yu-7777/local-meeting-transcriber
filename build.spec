@@ -5,8 +5,10 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 datas, binaries, hiddenimports = [], [], []
 
 # ネイティブ DLL とデータを丸ごと拾う必要があるパッケージ
+# comtypes は動的に生成した COM 型モジュールを imp/pkgutil 経由で読むため、
+# hiddenimports だけでは PyInstaller が見つけられない。collect_all で拾う。
 for pkg in ("ctranslate2", "onnxruntime", "sherpa_onnx", "av", "pyaudiowpatch",
-            "tokenizers"):
+            "tokenizers", "comtypes"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -20,7 +22,7 @@ hiddenimports += ["faster_whisper", "local_transcription", "local_transcription.
                   "local_transcription.check_devices", "local_transcription.download_models",
                   "local_transcription.gui", "local_transcription.apppaths",
                   "local_transcription.config", "local_transcription.common",
-                  "local_transcription.shortcut"]
+                  "local_transcription.shortcut", "local_transcription.device_watch"]
 
 a = Analysis(
     ["app.py"],
