@@ -185,6 +185,7 @@ class _Connection:
         self._ready = threading.Event()
         self._failed = False
         self._subscribe_cb = None    # 参照を保持（GC されると通知が届かない）
+        self._orphans = []           # 応答が返らなかった問い合わせ（下記）
 
         name = f"{APP_NAME} {label}".strip()
         self._ml = _pa.pa_threaded_mainloop_new()
@@ -232,6 +233,9 @@ class _Connection:
         finally:
             _pa.pa_threaded_mainloop_unlock(self._ml)
         if not done.wait(timeout):
+            # 諦めた後でコールバックが呼ばれることがある。その時に
+            # 関数オブジェクトが GC 済みだと落ちるので、参照を残しておく
+            self._orphans.append(start)
             raise RuntimeError("音声サーバが応答しませんでした。")
 
     def defaults(self):
@@ -415,6 +419,13 @@ class Stream:
         if self._thread is not None:
             # 読み取りは 1 チャンク（20ms 前後）で返るので、すぐ抜ける
             self._thread.join(timeout=2.0)
+            if self._thread.is_alive():
+                # まだ pa_simple_read の中にいる。ここで解放すると
+                # 読み取り中のメモリを外すことになるので、あえて放置する
+                # （プロセス終了で回収される。落とすよりは漏らすほうがまし）
+                self._thread = None
+                self._handle = None
+                return
             self._thread = None
         if self._handle:
             _pas.pa_simple_free(self._handle)
