@@ -67,6 +67,10 @@ else
     "$PYEXE" -m venv .venv || fail "仮想環境を作れませんでした"
 fi
 VENV_PY=".venv/bin/python"
+# 既にある .venv が別の道具で作られていると pip が入っていないことがある。
+# そのまま進むと「No module named pip」で止まって理由が分かりにくい
+"$VENV_PY" -m pip --version >/dev/null 2>&1 \
+    || fail "既にある .venv が使えません（pip が入っていません）。.venv を削除してから、もう一度 setup.sh を実行してください"
 
 # ---------------------------------------------------------------- [3/4]
 say ""
