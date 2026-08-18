@@ -469,12 +469,20 @@ def main():
                 return  # 非対話実行時は Ctrl+C のみで停止
             stop_event.set()
 
-        threading.Thread(target=wait_for_enter, daemon=True).start()
+        # 端末につながっていない時（スクリプトから動かす時など）は Enter を
+        # 受け取れない。それでも待つスレッドを残すと、終了時に stdin のロックを
+        # 掴んだままになり Python が異常終了する（--seconds で再現）
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+        if interactive:
+            threading.Thread(target=wait_for_enter, daemon=True).start()
 
         if args.seconds:
-            print(f"録音中です。{args.seconds:.0f} 秒で自動停止します (Enter / Ctrl+C で即停止)")
-        else:
+            keys = "Enter / Ctrl+C" if interactive else "Ctrl+C"
+            print(f"録音中です。{args.seconds:.0f} 秒で自動停止します ({keys} で即停止)")
+        elif interactive:
             print("録音中です。停止するには Enter を押してください (Ctrl+C でも可)")
+        else:
+            print("録音中です。停止するには Ctrl+C を押してください")
         print()
         try:
             while not stop_event.is_set():
