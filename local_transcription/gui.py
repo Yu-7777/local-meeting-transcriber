@@ -18,14 +18,11 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-import pyaudiowpatch as pyaudio
-
-from . import config
-from . import record
-
+from . import audio
 from . import common
-from . import device_watch
+from . import config
 from . import download_models
+from . import record
 from .apppaths import ROOT, child_command
 
 # デバイス変更通知が連続で来た時に、更新やログ出力を間引く間隔（秒）
@@ -53,37 +50,6 @@ def window_height(wanted, screen_height):
     ログ欄を掴めなくなる。画面に収まる範囲までに抑える。
     """
     return f"{WIDTH}x{max(MIN_HEIGHT, min(wanted + 24, screen_height - TASKBAR_MARGIN))}"
-
-
-def list_devices():
-    """(ループバック一覧, マイク一覧) を返す。要素は (表示名, index)."""
-    p = pyaudio.PyAudio()
-    try:
-        wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-        try:
-            # 録音時と同じ手順で決める。GUI が独自に選ぶと ★既定 の表示と
-            # 実際に録音されるデバイスが食い違う
-            default_lb = record.resolve_loopback(p, None)["index"]
-        except (Exception, SystemExit):
-            default_lb = None  # 決められなくても一覧は出す（手で選べる）
-        default_mic = wasapi["defaultInputDevice"]
-
-        loopbacks, mics = [], []
-        for lb in p.get_loopback_device_info_generator():
-            mark = " ★既定" if lb["index"] == default_lb else ""
-            name = lb["name"].replace(" [Loopback]", "")
-            loopbacks.append((f"{name}{mark}", lb["index"]))
-
-        for i in range(p.get_device_count()):
-            d = p.get_device_info_by_index(i)
-            if d["hostApi"] != wasapi["index"]:
-                continue
-            if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False):
-                mark = " ★既定" if d["index"] == default_mic else ""
-                mics.append((f"{d['name']}{mark}", d["index"]))
-        return loopbacks, mics
-    finally:
-        p.terminate()
 
 
 class App(ttk.Frame):
@@ -122,7 +88,7 @@ class App(ttk.Frame):
         「更新」ボタンでの手動更新は残るので、ここが使えない環境でも困らない。
         """
         try:
-            watcher = device_watch.DeviceWatcher(
+            watcher = audio.DeviceWatcher(
                 lambda: self.msg_queue.put(("device_changed", None)))
             watcher.start()
         except Exception:
@@ -285,7 +251,7 @@ class App(ttk.Frame):
 
     def refresh_devices(self):
         try:
-            loopbacks, mics = list_devices()
+            loopbacks, mics = audio.list_devices()
         except Exception as exc:
             messagebox.showerror("デバイス取得に失敗", str(exc))
             return

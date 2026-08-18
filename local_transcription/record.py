@@ -1,6 +1,7 @@
 """PC の出力音声(相手)と自分のマイクを、別々の WAV に同時録音する.
 
-WASAPI ループバックで OS 側から音を取る。使い方と録音時の注意は README。
+OS 側のループバック機能で音を取る（Windows は WASAPI、Linux は sink の
+monitor。差は audio.py 越しに吸収する）。使い方と録音時の注意は README。
 """
 
 import argparse
@@ -17,14 +18,14 @@ from ctypes import wintypes
 from pathlib import Path
 
 import numpy as np
-import pyaudiowpatch as pyaudio
 
+from . import audio
 from . import common
 from . import config
 from .common import hhmmss
 
 CHUNK = 1024
-SAMPLE_WIDTH = 2  # paInt16
+SAMPLE_WIDTH = 2  # 16bit PCM
 START_TIMEOUT = 10.0  # 全ストリームが動き出すのを待つ上限(秒)
 # これを超える時間軸のズレを無音で埋める(秒)。2 本の開始時刻は実測で 0.26〜0.36 秒
 # ずれるので、それを下回っていないと先頭が揃わない。上げる場合はここが上限
@@ -175,15 +176,15 @@ class StreamRecorder:
         self._thread = None
         self._wave = None
 
-    # --- PortAudio コールバック（リアルタイムスレッド） -------------------
-    def _callback(self, in_data, frame_count, time_info, status):
-        now = time.perf_counter()
+    # --- バックエンドからの受け取り（リアルタイムスレッド） ---------------
+    def _on_chunk(self, ts, data, overflow):
+        """1 チャンク届くたびに呼ばれる。ts はそのチャンクの末尾の時刻."""
         if self.t0 is None:
-            self.t0 = now - frame_count / self.rate  # このチャンクの先頭時刻
-        if status:
+            frames = len(data) // (SAMPLE_WIDTH * self.channels)
+            self.t0 = ts - frames / self.rate  # このチャンクの先頭時刻
+        if overflow:
             self.overflows += 1
-        self.queue.put((now, in_data))
-        return (None, pyaudio.paContinue)
+        self.queue.put((ts, data))
 
     def _write_silence(self, frames):
         """無音を frames フレーム分だけ書き込む（1 フレーム = 全チャンネル分）."""
@@ -219,6 +220,8 @@ class StreamRecorder:
             # 本来この位置にあるべきフレーム数と、実際に書いた数を突き合わせる。
             # WASAPI ループバックは何も再生されていない間データを返さないため、
             # 会議の沈黙中に穴が空く。そのぶんを無音で埋めて時間軸を保つ。
+            # （Linux の monitor は無音でも流れてくるので、こちらで埋まるのは
+            # 本当に取りこぼした時だけになる）
             expected = int(round((chunk_start - base_t0) * self.rate))
             gap = expected - self.frames_written
             if gap > tolerance:
@@ -247,7 +250,7 @@ class StreamRecorder:
                 self._write_silence(gap)
                 self.filled_sec += gap / self.rate
 
-    def start(self, p):
+    def start(self, system):
         self._wave = wave.open(str(self.path), "wb")
         self._wave.setnchannels(self.channels)
         self._wave.setsampwidth(SAMPLE_WIDTH)
@@ -256,22 +259,15 @@ class StreamRecorder:
         self._thread = threading.Thread(target=self._writer, daemon=True)
         self._thread.start()
 
-        self.stream = p.open(
-            format=pyaudio.paInt16,
-            channels=self.channels,
-            rate=self.rate,
-            input=True,
-            input_device_index=self.device["index"],
-            frames_per_buffer=CHUNK,
-            stream_callback=self._callback,
-        )
+        self.stream = system.open_stream(
+            self.device, self.rate, self.channels, CHUNK, self._on_chunk)
 
     def stop(self):
         if self._stop_time is None:
             self._stop_time = time.perf_counter()
         if self.stream is not None:
             try:
-                self.stream.stop_stream()
+                self.stream.stop()
             finally:
                 self.stream.close()
                 self.stream = None
@@ -308,38 +304,6 @@ def bar(level, width=16):
     return "█" * filled + "░" * (width - filled), level_db(level)
 
 
-def resolve_loopback(p, index):
-    if index is not None:
-        info = p.get_device_info_by_index(index)
-        if not info.get("isLoopbackDevice", False):
-            raise SystemExit(
-                f"index {index} はループバックデバイスではありません。\n"
-                f"{common.cli_hint('devices')} の"
-                "「ループバックデバイス」欄から選んでください。"
-            )
-        return info
-    try:
-        return p.get_default_wasapi_loopback()
-    except Exception:
-        pass
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-    speakers = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
-    for lb in p.get_loopback_device_info_generator():
-        if speakers["name"] in lb["name"]:
-            return lb
-    raise SystemExit(
-        "ループバックデバイスが見つかりませんでした。"
-        f"{common.cli_hint('devices')} で確認してください。"
-    )
-
-
-def resolve_mic(p, index):
-    if index is not None:
-        return p.get_device_info_by_index(index)
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-    return p.get_device_info_by_index(wasapi["defaultInputDevice"])
-
-
 class RecordingSession:
     """録音一式（デバイス解決・時間軸の同期・meta.json 書き出し）をまとめたもの.
 
@@ -353,7 +317,7 @@ class RecordingSession:
         self._loopback_index = loopback_index
         self._barrier = threading.Event()
         self._base_t0_box = [None]
-        self._p = None
+        self._audio = None
         self._wall_start = None
         self._stopped = False
         self.recorders = []
@@ -363,9 +327,9 @@ class RecordingSession:
 
     def start(self):
         self.outdir.mkdir(parents=True, exist_ok=True)
-        self._p = pyaudio.PyAudio()
-        loopback = resolve_loopback(self._p, self._loopback_index)
-        mic = resolve_mic(self._p, self._mic_index)
+        self._audio = audio.open()
+        loopback = self._audio.resolve_loopback(self._loopback_index)
+        mic = self._audio.resolve_mic(self._mic_index)
         self.recorders = [
             StreamRecorder("system", "相手", loopback, self.outdir / "system.wav",
                            self._barrier, self._base_t0_box),
@@ -375,7 +339,7 @@ class RecordingSession:
         self.started_at = dt.datetime.now().astimezone()
         self._wall_start = time.perf_counter()
         for r in self.recorders:
-            r.start(self._p)
+            r.start(self._audio)
         # 基準時刻の確定は別スレッドに逃がす（GUI を固めないため）
         threading.Thread(target=self._settle, daemon=True).start()
 
@@ -443,9 +407,9 @@ class RecordingSession:
                 r.stop()
             except Exception:
                 pass
-        if self._p is not None:
-            self._p.terminate()
-            self._p = None
+        if self._audio is not None:
+            self._audio.close()
+            self._audio = None
 
     def summary_lines(self):
         """終了後の要約（CLI・GUI 共通の文言）."""

@@ -159,14 +159,13 @@ class TestAppBuilds(GuiTestCase):
 
     def test_default_loopback_matches_recorder(self):
         """★既定 が、実際に録音されるデバイスと一致すること."""
-        from local_transcription import record
+        from local_transcription import audio
         self.settle()
-        import pyaudiowpatch as pyaudio
-        p = pyaudio.PyAudio()
+        system = audio.open()
         try:
-            expected = record.resolve_loopback(p, None)["index"]
+            expected = system.resolve_loopback(None)["index"]
         finally:
-            p.terminate()
+            system.close()
         marked = [i for n, i in self.app._loopbacks if "★" in n]
         self.assertEqual(marked, [expected])
 
