@@ -50,4 +50,6 @@ def cli_hint(subcommand, *args):
     tail = " ".join([subcommand, *(str(a) for a in args)]).strip()
     if FROZEN:
         return f"{Path(sys.executable).name} {tail}"
-    return f".venv\\Scripts\\python.exe app.py {tail}"
+    if sys.platform == "win32":
+        return f".venv\\Scripts\\python.exe app.py {tail}"
+    return f".venv/bin/python app.py {tail}"
