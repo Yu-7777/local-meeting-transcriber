@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -109,9 +110,41 @@ def recording_size(path):
 def move_to_trash(path):
     """フォルダをごみ箱へ移す.
 
-    完全削除ではなくごみ箱にするのは、エクスプローラーでの削除と同じ挙動が
+    完全削除ではなくごみ箱にするのは、ファイル管理ソフトでの削除と同じ挙動が
     最も驚きが少なく、録音は取り直しがきかないため。
     """
+    path = Path(path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(path)
+    if sys.platform == "win32":
+        _trash_windows(path)
+    else:
+        _trash_freedesktop(path)
+
+
+def _trash_freedesktop(path):
+    """gio に任せてごみ箱へ移す（ファイル管理ソフトから「元に戻す」できる）.
+
+    自前で ~/.local/share/Trash に書くこともできるが、保存先を別ドライブに
+    してあるとそちらの .Trash-<uid> に入れる必要があり、規約どおりに実装
+    し損ねると「消えたのに戻せない」が起きる。gio は glib の一部で、
+    デスクトップ環境には最初から入っている。
+    """
+    try:
+        proc = subprocess.run(["gio", "trash", "--", str(path)],
+                              capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        raise OSError(
+            "ごみ箱へ移せませんでした（gio コマンドが見つかりません）。"
+            f"手で削除してください: {path}")
+    except subprocess.TimeoutExpired:
+        raise OSError(f"ごみ箱へ移す処理が 60 秒で返りませんでした: {path}")
+    if proc.returncode != 0:
+        raise OSError(
+            f"ごみ箱へ移せませんでした: {path}\n{proc.stderr.strip()}")
+
+
+def _trash_windows(path):
     FO_DELETE = 0x0003
     FOF_SILENT = 0x0004
     FOF_NOCONFIRMATION = 0x0010
@@ -129,10 +162,6 @@ def move_to_trash(path):
             ("hNameMappings", ctypes.c_void_p),
             ("lpszProgressTitle", wintypes.LPCWSTR),
         ]
-
-    path = Path(path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(path)
 
     op = SHFILEOPSTRUCTW()
     op.wFunc = FO_DELETE

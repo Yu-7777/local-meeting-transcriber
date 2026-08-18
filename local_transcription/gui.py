@@ -28,6 +28,10 @@ from .apppaths import ROOT, child_command
 # デバイス変更通知が連続で来た時に、更新やログ出力を間引く間隔（秒）
 DEVICE_CHANGE_DEBOUNCE_SEC = 1.5
 
+# 等幅フォント。数字の幅が揃わないとメーターと経過時間の桁がずれる。
+# Consolas は Windows だけなので、Linux では標準で入っているものを使う
+MONO = "Consolas" if sys.platform == "win32" else "DejaVu Sans Mono"
+
 MODELS = download_models.ALL_MODELS
 WIDTH = 720
 # 縮めた分はログ欄が吸う（伸びる行はそこだけ）。この高さでも操作部は隠れない。
@@ -41,6 +45,19 @@ FILE_LOCKED_HINT = "音声ファイルを開いているアプリがあれば閉
 AUDIO_TYPES = [("音声・動画ファイル",
                 " ".join(f"*{s}" for s in sorted(common.AUDIO_SUFFIXES))),
                ("すべてのファイル", "*.*")]
+
+
+def open_in_file_manager(path):
+    """フォルダをファイル管理ソフトで開く.
+
+    Windows は os.startfile、それ以外は xdg-open（デスクトップ環境が
+    既定のファイル管理ソフトへ振り分ける）。
+    """
+    if sys.platform == "win32":
+        os.startfile(str(path))
+        return
+    subprocess.Popen(["xdg-open", str(path)],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def window_height(wanted, screen_height):
@@ -133,7 +150,7 @@ class App(ttk.Frame):
                                      command=self.toggle_record)
         self.btn_record.grid(row=0, column=0)
         self.lbl_time = ttk.Label(ctrl, text="00:00:00",
-                                  font=("Consolas", 16))
+                                  font=(MONO, 16))
         self.lbl_time.grid(row=0, column=1, padx=14)
         self.lbl_state = ttk.Label(ctrl, text="待機中", foreground="gray")
         self.lbl_state.grid(row=0, column=2, sticky="w")
@@ -151,7 +168,7 @@ class App(ttk.Frame):
             ttk.Label(meters, text=label, width=4).grid(row=i, column=0, sticky="w")
             pb = ttk.Progressbar(meters, maximum=100, length=260)
             pb.grid(row=i, column=1, sticky="ew", padx=6, pady=1)
-            db = ttk.Label(meters, text="  -- dB", width=9, font=("Consolas", 9))
+            db = ttk.Label(meters, text="  -- dB", width=9, font=(MONO, 9))
             db.grid(row=i, column=2, sticky="e")
             self.meters[label] = (pb, db)
 
@@ -232,13 +249,13 @@ class App(ttk.Frame):
         box.rowconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
 
-        self.txt = tk.Text(box, height=11, wrap="none", font=("Consolas", 9))
+        self.txt = tk.Text(box, height=11, wrap="none", font=(MONO, 9))
         self.txt.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(box, orient="vertical", command=self.txt.yview)
         sb.grid(row=0, column=1, sticky="ns")
         self.txt.configure(yscrollcommand=sb.set, state="disabled")
 
-        self.lbl_progress = ttk.Label(box, text="", font=("Consolas", 9),
+        self.lbl_progress = ttk.Label(box, text="", font=(MONO, 9),
                                       foreground="#0a6")
         self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
@@ -415,7 +432,7 @@ class App(ttk.Frame):
             if 0 <= idx < len(self._recordings):
                 target = self._recordings[idx]
         target.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(target))
+        open_in_file_manager(target)
 
     # -------------------------------------------------------------- 録音制御
     def toggle_record(self):

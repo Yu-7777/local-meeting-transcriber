@@ -96,12 +96,19 @@ class TestChildCommand(unittest.TestCase):
         self.assertTrue(all(isinstance(x, str) for x in cmd))
 
 
+WINDOWS = sys.platform == "win32"
+only_windows = unittest.skipUnless(WINDOWS, "Windows 専用の経路")
+only_linux = unittest.skipIf(WINDOWS, "Linux 専用の経路")
+
+
 class TestShortcutTargets(unittest.TestCase):
+    @only_windows
     def test_quote_escapes_single_quotes(self):
         # PowerShell へ渡すので、' を含むユーザー名で壊れないこと
         self.assertEqual(shortcut._quote("O'Brien"), "'O''Brien'")
         self.assertEqual(shortcut._quote(Path(r"C:\x")), r"'C:\x'")
 
+    @only_windows
     def test_source_targets_use_pythonw(self):
         with mock.patch.object(shortcut, "FROZEN", False):
             exe, args, cwd, icon = shortcut.targets()
@@ -110,13 +117,67 @@ class TestShortcutTargets(unittest.TestCase):
         self.assertEqual(args, "-m local_transcription.gui")
         self.assertEqual(cwd, shortcut.ROOT)
 
-    def test_frozen_targets_use_the_exe_itself(self):
-        with mock.patch.object(shortcut, "FROZEN", True), \
-             mock.patch.object(sys, "executable", r"C:\x\MeetingTranscriber.exe"):
+    @only_linux
+    def test_source_targets_use_the_venv_python(self):
+        with mock.patch.object(shortcut, "FROZEN", False):
             exe, args, cwd, icon = shortcut.targets()
-        self.assertEqual(exe, Path(r"C:\x\MeetingTranscriber.exe"))
+        self.assertEqual(exe, shortcut.ROOT / ".venv" / "bin" / "python")
+        self.assertEqual(args, "-m local_transcription.gui")
+        self.assertEqual(cwd, shortcut.ROOT)
+
+    def test_frozen_targets_use_the_exe_itself(self):
+        exe_path = (r"C:\x\MeetingTranscriber.exe" if WINDOWS
+                    else "/x/MeetingTranscriber")
+        with mock.patch.object(shortcut, "FROZEN", True), \
+             mock.patch.object(sys, "executable", exe_path):
+            exe, args, cwd, icon = shortcut.targets()
+        self.assertEqual(exe, Path(exe_path))
         self.assertEqual(args, "")
         self.assertEqual(icon, exe)
+
+
+@only_linux
+class TestDesktopEntry(unittest.TestCase):
+    """Linux のアプリ一覧に出す .desktop（Windows のスタートメニュー相当）."""
+
+    def entry(self):
+        return shortcut._desktop_text(
+            Path("/home/だれか/私の 会議/.venv/bin/python"),
+            "-m local_transcription.gui", Path("/home/だれか/私の 会議"),
+            shortcut.ICON_NAME)
+
+    def test_required_keys_are_present(self):
+        text = self.entry()
+        for key in ("[Desktop Entry]", "Type=Application", f"Name={shortcut.NAME}",
+                    "Terminal=false", f"Icon={shortcut.ICON_NAME}"):
+            self.assertIn(key, text)
+
+    def test_path_with_spaces_is_quoted(self):
+        """空白を含むフォルダに置かれても起動できること."""
+        exec_line = [l for l in self.entry().splitlines()
+                     if l.startswith("Exec=")][0]
+        self.assertEqual(
+            exec_line,
+            'Exec="/home/だれか/私の 会議/.venv/bin/python" '
+            '-m local_transcription.gui')
+
+    def test_searchable_by_japanese_and_ascii(self):
+        """Super キーで「会議」でも meeting でも引けること."""
+        keywords = [l for l in self.entry().splitlines()
+                    if l.startswith("Keywords=")][0]
+        self.assertIn("会議", keywords)
+        self.assertIn("meeting", keywords)
+
+    def test_written_where_the_desktop_looks_for_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict("os.environ", {"XDG_DATA_HOME": tmp}), \
+                 mock.patch.object(shortcut, "targets", return_value=(
+                     Path(sys.executable), "-m local_transcription.gui",
+                     shortcut.ROOT, shortcut.ICON_NAME)):
+                made = shortcut.create(desktop=False)
+            expected = Path(tmp) / "applications" / f"{shortcut.DESKTOP_ID}.desktop"
+            self.assertEqual(made, [str(expected)])
+            self.assertIn(shortcut.NAME, expected.read_text(encoding="utf-8"))
 
 
 class TestMoveToTrash(unittest.TestCase):
@@ -149,6 +210,37 @@ class TestMoveToTrash(unittest.TestCase):
             return None
         return [n for n in r.stdout.splitlines() if n.strip()]
 
+    @staticmethod
+    def trash_names():
+        """ごみ箱の中身を名前で返す（Linux）。照会できない環境では None."""
+        try:
+            r = subprocess.run(
+                ["gio", "list", "trash:///"], timeout=60,
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace")
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode != 0:
+            return None
+        return [n for n in r.stdout.splitlines() if n.strip()]
+
+    @only_linux
+    def test_folder_actually_goes_to_the_trash(self):
+        """消えるだけでは不足。完全削除だと録音が二度と戻らない."""
+        before = self.trash_names()
+        if before is None:
+            self.skipTest("ごみ箱を照会できない環境")
+        name = f"テスト用_ごみ箱確認_{len(before)}_{id(self)}"
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = helpers.make_recording(Path(tmp), name)
+            record.move_to_trash(folder)
+            self.assertFalse(folder.exists())
+            # 親は残す（保存先ごと消してはいけない）
+            self.assertTrue(Path(tmp).is_dir())
+        self.assertIn(name, self.trash_names(),
+                      "ごみ箱に入っていない = 完全削除されている")
+
+    @only_windows
     def test_folder_actually_goes_to_the_recycle_bin(self):
         """消えるだけでは不足。完全削除だと録音が二度と戻らない."""
         before = self.recycle_bin_names()
@@ -175,7 +267,8 @@ class TestDeviceListing(unittest.TestCase):
             [sys.executable, "app.py", "devices"], cwd=helpers.ROOT,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=120)
-        if "PortAudio" in r.stderr or "pyaudio" in r.stderr.lower():
+        if ("PortAudio" in r.stderr or "pyaudio" in r.stderr.lower()
+                or "libpulse" in r.stderr or "音声サーバ" in r.stdout + r.stderr):
             self.skipTest("音声装置を開けない環境")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
