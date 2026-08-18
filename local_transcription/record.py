@@ -357,18 +357,25 @@ class RecordingSession:
     def start(self):
         self.outdir.mkdir(parents=True, exist_ok=True)
         self._audio = audio.open()
-        loopback = self._audio.resolve_loopback(self._loopback_index)
-        mic = self._audio.resolve_mic(self._mic_index)
-        self.recorders = [
-            StreamRecorder("system", "相手", loopback, self.outdir / "system.wav",
-                           self._barrier, self._base_t0_box),
-            StreamRecorder("mic", "自分", mic, self.outdir / "mic.wav",
-                           self._barrier, self._base_t0_box),
-        ]
-        self.started_at = dt.datetime.now().astimezone()
-        self._wall_start = time.perf_counter()
-        for r in self.recorders:
-            r.start(self._audio)
+        # 途中で失敗した時は、ここで開いたものを自分で閉じる。呼び出し側
+        # （GUI）はエラーを出して session を捨てるだけなので、片方だけ開いた
+        # ストリームが録り続けてしまう
+        try:
+            loopback = self._audio.resolve_loopback(self._loopback_index)
+            mic = self._audio.resolve_mic(self._mic_index)
+            self.recorders = [
+                StreamRecorder("system", "相手", loopback, self.outdir / "system.wav",
+                               self._barrier, self._base_t0_box),
+                StreamRecorder("mic", "自分", mic, self.outdir / "mic.wav",
+                               self._barrier, self._base_t0_box),
+            ]
+            self.started_at = dt.datetime.now().astimezone()
+            self._wall_start = time.perf_counter()
+            for r in self.recorders:
+                r.start(self._audio)
+        except BaseException:   # SystemExit も拾う（デバイス指定の誤り）
+            self.close()
+            raise
         # 基準時刻の確定は別スレッドに逃がす（GUI を固めないため）
         threading.Thread(target=self._settle, daemon=True).start()
 
