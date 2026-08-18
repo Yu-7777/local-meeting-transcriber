@@ -94,7 +94,7 @@ def build_plan(target, outdir=None):
 
 def run_diarization(wav_path, num_speakers, threads, threshold):
     """相手チャンネルを話者ごとに分ける。失敗しても文字起こしは続行する."""
-    import diarization
+    from . import diarization
 
     print("\n--- 話者分離 (相手チャンネル) ---")
     if num_speakers:
@@ -189,7 +189,7 @@ def load_model(model_name, threads, offline):
 
     取得済みなら必ずローカルだけを見る（毎回 Hub へ更新確認に行かせない）。
     """
-    import download_models
+    from . import download_models
 
     have_model = download_models.is_downloaded(model_name)
     if not have_model:
@@ -278,7 +278,7 @@ def main():
 
         # 相手チャンネルだけ話者分離する（自分は分ける必要がない）
         if args.diarize and diarizable:
-            import diarization
+            from . import diarization
 
             thr = args.diar_threshold or diarization.DEFAULT_THRESHOLD
             turns = run_diarization(wav_path, args.speakers, threads, thr)
