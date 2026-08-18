@@ -18,18 +18,19 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-import pyaudiowpatch as pyaudio
-
-from . import config
-from . import record
-
+from . import audio
 from . import common
-from . import device_watch
+from . import config
 from . import download_models
+from . import record
 from .apppaths import ROOT, child_command
 
 # デバイス変更通知が連続で来た時に、更新やログ出力を間引く間隔（秒）
 DEVICE_CHANGE_DEBOUNCE_SEC = 1.5
+
+# 等幅フォント。数字の幅が揃わないとメーターと経過時間の桁がずれる。
+# Consolas は Windows だけなので、Linux では標準で入っているものを使う
+MONO = "Consolas" if sys.platform == "win32" else "DejaVu Sans Mono"
 
 MODELS = download_models.ALL_MODELS
 WIDTH = 720
@@ -46,6 +47,19 @@ AUDIO_TYPES = [("音声・動画ファイル",
                ("すべてのファイル", "*.*")]
 
 
+def open_in_file_manager(path):
+    """フォルダをファイル管理ソフトで開く.
+
+    Windows は os.startfile、それ以外は xdg-open（デスクトップ環境が
+    既定のファイル管理ソフトへ振り分ける）。
+    """
+    if sys.platform == "win32":
+        os.startfile(str(path))
+        return
+    subprocess.Popen(["xdg-open", str(path)],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def window_height(wanted, screen_height):
     """起動時の窓の大きさを決める.
 
@@ -53,37 +67,6 @@ def window_height(wanted, screen_height):
     ログ欄を掴めなくなる。画面に収まる範囲までに抑える。
     """
     return f"{WIDTH}x{max(MIN_HEIGHT, min(wanted + 24, screen_height - TASKBAR_MARGIN))}"
-
-
-def list_devices():
-    """(ループバック一覧, マイク一覧) を返す。要素は (表示名, index)."""
-    p = pyaudio.PyAudio()
-    try:
-        wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-        try:
-            # 録音時と同じ手順で決める。GUI が独自に選ぶと ★既定 の表示と
-            # 実際に録音されるデバイスが食い違う
-            default_lb = record.resolve_loopback(p, None)["index"]
-        except (Exception, SystemExit):
-            default_lb = None  # 決められなくても一覧は出す（手で選べる）
-        default_mic = wasapi["defaultInputDevice"]
-
-        loopbacks, mics = [], []
-        for lb in p.get_loopback_device_info_generator():
-            mark = " ★既定" if lb["index"] == default_lb else ""
-            name = lb["name"].replace(" [Loopback]", "")
-            loopbacks.append((f"{name}{mark}", lb["index"]))
-
-        for i in range(p.get_device_count()):
-            d = p.get_device_info_by_index(i)
-            if d["hostApi"] != wasapi["index"]:
-                continue
-            if d["maxInputChannels"] > 0 and not d.get("isLoopbackDevice", False):
-                mark = " ★既定" if d["index"] == default_mic else ""
-                mics.append((f"{d['name']}{mark}", d["index"]))
-        return loopbacks, mics
-    finally:
-        p.terminate()
 
 
 class App(ttk.Frame):
@@ -104,6 +87,7 @@ class App(ttk.Frame):
         self._timers = {}
         self._last_device_change = 0.0
         self._device_change_during_recording = False
+        self._watcher = None
 
         self._build_record_box()
         self._build_transcribe_box()
@@ -121,12 +105,16 @@ class App(ttk.Frame):
 
         「更新」ボタンでの手動更新は残るので、ここが使えない環境でも困らない。
         """
+        # 渡すのはキューだけにする。App を渡すと、通知を受け取る側のスレッドから
+        # Tk のオブジェクトに手が届いてしまう（tkinter は他スレッドから触ると
+        # 落ちる）。キューは thread-safe で、Tk とは無関係。
+        msg_queue = self.msg_queue
         try:
-            watcher = device_watch.DeviceWatcher(
-                lambda: self.msg_queue.put(("device_changed", None)))
-            watcher.start()
+            self._watcher = audio.DeviceWatcher(
+                lambda: msg_queue.put(("device_changed", None)))
+            self._watcher.start()
         except Exception:
-            pass
+            self._watcher = None
 
     # ---------------------------------------------------------------- 録音
     def _build_record_box(self):
@@ -167,7 +155,7 @@ class App(ttk.Frame):
                                      command=self.toggle_record)
         self.btn_record.grid(row=0, column=0)
         self.lbl_time = ttk.Label(ctrl, text="00:00:00",
-                                  font=("Consolas", 16))
+                                  font=(MONO, 16))
         self.lbl_time.grid(row=0, column=1, padx=14)
         self.lbl_state = ttk.Label(ctrl, text="待機中", foreground="gray")
         self.lbl_state.grid(row=0, column=2, sticky="w")
@@ -185,7 +173,7 @@ class App(ttk.Frame):
             ttk.Label(meters, text=label, width=4).grid(row=i, column=0, sticky="w")
             pb = ttk.Progressbar(meters, maximum=100, length=260)
             pb.grid(row=i, column=1, sticky="ew", padx=6, pady=1)
-            db = ttk.Label(meters, text="  -- dB", width=9, font=("Consolas", 9))
+            db = ttk.Label(meters, text="  -- dB", width=9, font=(MONO, 9))
             db.grid(row=i, column=2, sticky="e")
             self.meters[label] = (pb, db)
 
@@ -266,13 +254,13 @@ class App(ttk.Frame):
         box.rowconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
 
-        self.txt = tk.Text(box, height=11, wrap="none", font=("Consolas", 9))
+        self.txt = tk.Text(box, height=11, wrap="none", font=(MONO, 9))
         self.txt.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(box, orient="vertical", command=self.txt.yview)
         sb.grid(row=0, column=1, sticky="ns")
         self.txt.configure(yscrollcommand=sb.set, state="disabled")
 
-        self.lbl_progress = ttk.Label(box, text="", font=("Consolas", 9),
+        self.lbl_progress = ttk.Label(box, text="", font=(MONO, 9),
                                       foreground="#0a6")
         self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
@@ -285,7 +273,7 @@ class App(ttk.Frame):
 
     def refresh_devices(self):
         try:
-            loopbacks, mics = list_devices()
+            loopbacks, mics = audio.list_devices()
         except Exception as exc:
             messagebox.showerror("デバイス取得に失敗", str(exc))
             return
@@ -449,7 +437,7 @@ class App(ttk.Frame):
             if 0 <= idx < len(self._recordings):
                 target = self._recordings[idx]
         target.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(target))
+        open_in_file_manager(target)
 
     # -------------------------------------------------------------- 録音制御
     def toggle_record(self):
@@ -651,10 +639,20 @@ class App(ttk.Frame):
         self._timers[func] = self.after(delay, func)
 
     def stop_polling(self):
-        """仕掛けた周期処理を全部止める。窓を閉じたあとに走らせないため."""
+        """仕掛けた周期処理とデバイス監視を止める。窓を閉じたあとに走らせないため.
+
+        監視は OS 側に接続を 1 本持つ（Linux では専用スレッドも）。閉じないと
+        窓を開け閉めするたびに積み上がる。
+        """
         for timer in self._timers.values():
             self.after_cancel(timer)   # 発火済みの ID を渡しても無害
         self._timers.clear()
+        if self._watcher is not None:
+            try:
+                self._watcher.stop()
+            except Exception:
+                pass      # 閉じる途中なので、ここで失敗しても進む
+            self._watcher = None
 
     def _drain_queue(self):
         try:
@@ -682,7 +680,12 @@ class App(ttk.Frame):
         """
         now = time.monotonic()
         if now - self._last_device_change < DEVICE_CHANGE_DEBOUNCE_SEC:
-            return  # 1 回の抜き差しで複数のイベントが連続するので間引く
+            # 1 回の抜き差しで通知が続けて来るので間引く。ただし捨てるだけに
+            # すると、最後の 1 回（＝構成が落ち着いた後の状態）を取りこぼして
+            # 一覧が古いまま残る。間隔を空けて、もう一度だけ見に行く
+            self._schedule(int(DEVICE_CHANGE_DEBOUNCE_SEC * 1000),
+                           self._on_device_changed)
+            return
         self._last_device_change = now
 
         if self.session is not None:

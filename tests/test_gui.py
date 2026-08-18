@@ -6,6 +6,7 @@
 どちらも「取得済み・正常系」しか通していなかったために漏れた。
 """
 
+import gc
 import io
 import queue
 import tempfile
@@ -63,11 +64,17 @@ class GuiTestCase(unittest.TestCase):
         self.root.update_idletasks()
 
     def tearDown(self):
-        self.app.stop_polling()
+        self.app.stop_polling()      # デバイス監視のスレッドもここで止まる
         self.root.destroy()
         for patch in reversed(self._patches):
             patch.stop()
         self.tmp.cleanup()
+        # 窓とアプリをこの場で回収しきる。監視スレッドが生きている間に、
+        # そちらのスレッドで GC が Tk オブジェクトを片付けると Tcl が
+        # 異常終了する (Tcl_AsyncDelete)。止めた直後のここなら必ず
+        # メインスレッドで片付く。
+        self.app = self.root = None
+        gc.collect()
 
     def settle(self):
         """after() で遅らせている初期化が終わるまで回す."""
@@ -116,6 +123,26 @@ class TestAppBuilds(GuiTestCase):
         self.app.stop_polling()
         self.assertEqual(self.app._timers, {})
 
+    def test_device_change_burst_refreshes_after_it_settles(self):
+        """1 回の抜き差しで通知は連続して来る。最後の 1 回を捨てると
+        一覧が古いまま残るので、間引いた時は後で見直す予約が要る."""
+        calls = []
+        with mock.patch.object(self.app, "refresh_devices",
+                               side_effect=lambda: calls.append(1)):
+            self.app._on_device_changed()   # 1 回目はその場で更新
+            self.app._on_device_changed()   # 続けて来た分は間引かれる
+            self.app._on_device_changed()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(self.app._on_device_changed, self.app._timers)
+
+    def test_stop_polling_stops_the_device_watch(self):
+        """監視は OS 側に接続を持つ。閉じないと窓の開け閉めで積み上がる."""
+        stopped = []
+        self.app._watcher = types.SimpleNamespace(stop=lambda: stopped.append(1))
+        self.app.stop_polling()
+        self.assertEqual(stopped, [1])
+        self.assertIsNone(self.app._watcher)
+
     def test_tick_updates_meters_and_reschedules(self):
         """録音中のメーター更新。録音時にしか走らないので明示的に通す."""
         stub = types.SimpleNamespace(
@@ -159,14 +186,13 @@ class TestAppBuilds(GuiTestCase):
 
     def test_default_loopback_matches_recorder(self):
         """★既定 が、実際に録音されるデバイスと一致すること."""
-        from local_transcription import record
+        from local_transcription import audio
         self.settle()
-        import pyaudiowpatch as pyaudio
-        p = pyaudio.PyAudio()
+        system = audio.open()
         try:
-            expected = record.resolve_loopback(p, None)["index"]
+            expected = system.resolve_loopback(None)["index"]
         finally:
-            p.terminate()
+            system.close()
         marked = [i for n, i in self.app._loopbacks if "★" in n]
         self.assertEqual(marked, [expected])
 

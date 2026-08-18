@@ -10,11 +10,17 @@
 #
 # 更新する時は、SAC が有効な Windows 11 で実際に録音と文字起こしを
 # 通してから上げること。
+#
+# Linux では SAC は関係ないが、同じ版で動かすほうが問題の切り分けが楽なので
+# ピンはそのまま共有する。音声の入出力は libpulse を ctypes で呼ぶので、
+# Linux 側に追加のパッケージは要らない（local_transcription/audio_pulse.py）。
 
 # --- 直接使うもの ---
-PyAudioWPatch==0.2.12.8   # WASAPI ループバック録音
-comtypes==1.4.16          # 音声デバイスの着脱通知 (Core Audio)。ネイティブ DLL を
-                          # 同梱しない純 Python パッケージなので SAC の対象外
+# 音声デバイスまわりは Windows だけがパッケージを必要とする
+PyAudioWPatch==0.2.12.8 ; sys_platform == "win32"   # WASAPI ループバック録音
+comtypes==1.4.16 ; sys_platform == "win32"          # 音声デバイスの着脱通知
+                          # (Core Audio)。ネイティブ DLL を同梱しない
+                          # 純 Python パッケージなので SAC の対象外
 faster-whisper==1.2.1     # 文字起こし (CTranslate2)
 sherpa-onnx==1.13.2       # 話者分離。1.13.4 は SAC にブロックされた
 av==17.0.0                # 音声デコード。18.0.0 は SAC にブロックされた

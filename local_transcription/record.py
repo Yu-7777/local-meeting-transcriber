@@ -1,6 +1,7 @@
 """PC の出力音声(相手)と自分のマイクを、別々の WAV に同時録音する.
 
-WASAPI ループバックで OS 側から音を取る。使い方と録音時の注意は README。
+OS 側のループバック機能で音を取る（Windows は WASAPI、Linux は sink の
+monitor。差は audio.py 越しに吸収する）。使い方と録音時の注意は README。
 """
 
 import argparse
@@ -9,6 +10,7 @@ import datetime as dt
 import json
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -17,14 +19,14 @@ from ctypes import wintypes
 from pathlib import Path
 
 import numpy as np
-import pyaudiowpatch as pyaudio
 
+from . import audio
 from . import common
 from . import config
 from .common import hhmmss
 
 CHUNK = 1024
-SAMPLE_WIDTH = 2  # paInt16
+SAMPLE_WIDTH = 2  # 16bit PCM
 START_TIMEOUT = 10.0  # 全ストリームが動き出すのを待つ上限(秒)
 # これを超える時間軸のズレを無音で埋める(秒)。2 本の開始時刻は実測で 0.26〜0.36 秒
 # ずれるので、それを下回っていないと先頭が揃わない。上げる場合はここが上限
@@ -108,9 +110,41 @@ def recording_size(path):
 def move_to_trash(path):
     """フォルダをごみ箱へ移す.
 
-    完全削除ではなくごみ箱にするのは、エクスプローラーでの削除と同じ挙動が
+    完全削除ではなくごみ箱にするのは、ファイル管理ソフトでの削除と同じ挙動が
     最も驚きが少なく、録音は取り直しがきかないため。
     """
+    path = Path(path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(path)
+    if sys.platform == "win32":
+        _trash_windows(path)
+    else:
+        _trash_freedesktop(path)
+
+
+def _trash_freedesktop(path):
+    """gio に任せてごみ箱へ移す（ファイル管理ソフトから「元に戻す」できる）.
+
+    自前で ~/.local/share/Trash に書くこともできるが、保存先を別ドライブに
+    してあるとそちらの .Trash-<uid> に入れる必要があり、規約どおりに実装
+    し損ねると「消えたのに戻せない」が起きる。gio は glib の一部で、
+    デスクトップ環境には最初から入っている。
+    """
+    try:
+        proc = subprocess.run(["gio", "trash", "--", str(path)],
+                              capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        raise OSError(
+            "ごみ箱へ移せませんでした（gio コマンドが見つかりません）。"
+            f"手で削除してください: {path}")
+    except subprocess.TimeoutExpired:
+        raise OSError(f"ごみ箱へ移す処理が 60 秒で返りませんでした: {path}")
+    if proc.returncode != 0:
+        raise OSError(
+            f"ごみ箱へ移せませんでした: {path}\n{proc.stderr.strip()}")
+
+
+def _trash_windows(path):
     FO_DELETE = 0x0003
     FOF_SILENT = 0x0004
     FOF_NOCONFIRMATION = 0x0010
@@ -128,10 +162,6 @@ def move_to_trash(path):
             ("hNameMappings", ctypes.c_void_p),
             ("lpszProgressTitle", wintypes.LPCWSTR),
         ]
-
-    path = Path(path).resolve()
-    if not path.exists():
-        raise FileNotFoundError(path)
 
     op = SHFILEOPSTRUCTW()
     op.wFunc = FO_DELETE
@@ -175,15 +205,15 @@ class StreamRecorder:
         self._thread = None
         self._wave = None
 
-    # --- PortAudio コールバック（リアルタイムスレッド） -------------------
-    def _callback(self, in_data, frame_count, time_info, status):
-        now = time.perf_counter()
+    # --- バックエンドからの受け取り（リアルタイムスレッド） ---------------
+    def _on_chunk(self, ts, data, overflow):
+        """1 チャンク届くたびに呼ばれる。ts はそのチャンクの末尾の時刻."""
         if self.t0 is None:
-            self.t0 = now - frame_count / self.rate  # このチャンクの先頭時刻
-        if status:
+            frames = len(data) // (SAMPLE_WIDTH * self.channels)
+            self.t0 = ts - frames / self.rate  # このチャンクの先頭時刻
+        if overflow:
             self.overflows += 1
-        self.queue.put((now, in_data))
-        return (None, pyaudio.paContinue)
+        self.queue.put((ts, data))
 
     def _write_silence(self, frames):
         """無音を frames フレーム分だけ書き込む（1 フレーム = 全チャンネル分）."""
@@ -219,6 +249,8 @@ class StreamRecorder:
             # 本来この位置にあるべきフレーム数と、実際に書いた数を突き合わせる。
             # WASAPI ループバックは何も再生されていない間データを返さないため、
             # 会議の沈黙中に穴が空く。そのぶんを無音で埋めて時間軸を保つ。
+            # （Linux の monitor は無音でも流れてくるので、こちらで埋まるのは
+            # 本当に取りこぼした時だけになる）
             expected = int(round((chunk_start - base_t0) * self.rate))
             gap = expected - self.frames_written
             if gap > tolerance:
@@ -247,7 +279,7 @@ class StreamRecorder:
                 self._write_silence(gap)
                 self.filled_sec += gap / self.rate
 
-    def start(self, p):
+    def start(self, system):
         self._wave = wave.open(str(self.path), "wb")
         self._wave.setnchannels(self.channels)
         self._wave.setsampwidth(SAMPLE_WIDTH)
@@ -256,22 +288,15 @@ class StreamRecorder:
         self._thread = threading.Thread(target=self._writer, daemon=True)
         self._thread.start()
 
-        self.stream = p.open(
-            format=pyaudio.paInt16,
-            channels=self.channels,
-            rate=self.rate,
-            input=True,
-            input_device_index=self.device["index"],
-            frames_per_buffer=CHUNK,
-            stream_callback=self._callback,
-        )
+        self.stream = system.open_stream(
+            self.device, self.rate, self.channels, CHUNK, self._on_chunk)
 
     def stop(self):
         if self._stop_time is None:
             self._stop_time = time.perf_counter()
         if self.stream is not None:
             try:
-                self.stream.stop_stream()
+                self.stream.stop()
             finally:
                 self.stream.close()
                 self.stream = None
@@ -308,38 +333,6 @@ def bar(level, width=16):
     return "█" * filled + "░" * (width - filled), level_db(level)
 
 
-def resolve_loopback(p, index):
-    if index is not None:
-        info = p.get_device_info_by_index(index)
-        if not info.get("isLoopbackDevice", False):
-            raise SystemExit(
-                f"index {index} はループバックデバイスではありません。\n"
-                f"{common.cli_hint('devices')} の"
-                "「ループバックデバイス」欄から選んでください。"
-            )
-        return info
-    try:
-        return p.get_default_wasapi_loopback()
-    except Exception:
-        pass
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-    speakers = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
-    for lb in p.get_loopback_device_info_generator():
-        if speakers["name"] in lb["name"]:
-            return lb
-    raise SystemExit(
-        "ループバックデバイスが見つかりませんでした。"
-        f"{common.cli_hint('devices')} で確認してください。"
-    )
-
-
-def resolve_mic(p, index):
-    if index is not None:
-        return p.get_device_info_by_index(index)
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-    return p.get_device_info_by_index(wasapi["defaultInputDevice"])
-
-
 class RecordingSession:
     """録音一式（デバイス解決・時間軸の同期・meta.json 書き出し）をまとめたもの.
 
@@ -353,7 +346,7 @@ class RecordingSession:
         self._loopback_index = loopback_index
         self._barrier = threading.Event()
         self._base_t0_box = [None]
-        self._p = None
+        self._audio = None
         self._wall_start = None
         self._stopped = False
         self.recorders = []
@@ -363,19 +356,26 @@ class RecordingSession:
 
     def start(self):
         self.outdir.mkdir(parents=True, exist_ok=True)
-        self._p = pyaudio.PyAudio()
-        loopback = resolve_loopback(self._p, self._loopback_index)
-        mic = resolve_mic(self._p, self._mic_index)
-        self.recorders = [
-            StreamRecorder("system", "相手", loopback, self.outdir / "system.wav",
-                           self._barrier, self._base_t0_box),
-            StreamRecorder("mic", "自分", mic, self.outdir / "mic.wav",
-                           self._barrier, self._base_t0_box),
-        ]
-        self.started_at = dt.datetime.now().astimezone()
-        self._wall_start = time.perf_counter()
-        for r in self.recorders:
-            r.start(self._p)
+        self._audio = audio.open()
+        # 途中で失敗した時は、ここで開いたものを自分で閉じる。呼び出し側
+        # （GUI）はエラーを出して session を捨てるだけなので、片方だけ開いた
+        # ストリームが録り続けてしまう
+        try:
+            loopback = self._audio.resolve_loopback(self._loopback_index)
+            mic = self._audio.resolve_mic(self._mic_index)
+            self.recorders = [
+                StreamRecorder("system", "相手", loopback, self.outdir / "system.wav",
+                               self._barrier, self._base_t0_box),
+                StreamRecorder("mic", "自分", mic, self.outdir / "mic.wav",
+                               self._barrier, self._base_t0_box),
+            ]
+            self.started_at = dt.datetime.now().astimezone()
+            self._wall_start = time.perf_counter()
+            for r in self.recorders:
+                r.start(self._audio)
+        except BaseException:   # SystemExit も拾う（デバイス指定の誤り）
+            self.close()
+            raise
         # 基準時刻の確定は別スレッドに逃がす（GUI を固めないため）
         threading.Thread(target=self._settle, daemon=True).start()
 
@@ -443,9 +443,9 @@ class RecordingSession:
                 r.stop()
             except Exception:
                 pass
-        if self._p is not None:
-            self._p.terminate()
-            self._p = None
+        if self._audio is not None:
+            self._audio.close()
+            self._audio = None
 
     def summary_lines(self):
         """終了後の要約（CLI・GUI 共通の文言）."""
@@ -505,12 +505,20 @@ def main():
                 return  # 非対話実行時は Ctrl+C のみで停止
             stop_event.set()
 
-        threading.Thread(target=wait_for_enter, daemon=True).start()
+        # 端末につながっていない時（スクリプトから動かす時など）は Enter を
+        # 受け取れない。それでも待つスレッドを残すと、終了時に stdin のロックを
+        # 掴んだままになり Python が異常終了する（--seconds で再現）
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+        if interactive:
+            threading.Thread(target=wait_for_enter, daemon=True).start()
 
         if args.seconds:
-            print(f"録音中です。{args.seconds:.0f} 秒で自動停止します (Enter / Ctrl+C で即停止)")
-        else:
+            keys = "Enter / Ctrl+C" if interactive else "Ctrl+C"
+            print(f"録音中です。{args.seconds:.0f} 秒で自動停止します ({keys} で即停止)")
+        elif interactive:
             print("録音中です。停止するには Enter を押してください (Ctrl+C でも可)")
+        else:
+            print("録音中です。停止するには Ctrl+C を押してください")
         print()
         try:
             while not stop_event.is_set():

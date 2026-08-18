@@ -1,6 +1,7 @@
 """モデルも録音も要らない部分の検証."""
 
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -30,17 +31,25 @@ class TestHhmmss(unittest.TestCase):
 
 
 class TestCliHint(unittest.TestCase):
+    """案内する呼び出し方は OS で違う（venv の中の置き場所が違うため）."""
+
+    WINDOWS = sys.platform == "win32"
+
     def test_source_form(self):
+        expected = (r".venv\Scripts\python.exe app.py download --all" if self.WINDOWS
+                    else ".venv/bin/python app.py download --all")
         with mock.patch.object(common, "FROZEN", False):
-            self.assertEqual(common.cli_hint("download", "--all"),
-                             r".venv\Scripts\python.exe app.py download --all")
+            self.assertEqual(common.cli_hint("download", "--all"), expected)
 
     def test_frozen_form(self):
         # exe には .venv も .py も無いので、案内を直書きすると嘘になる
+        exe = (r"C:\x\MeetingTranscriber.exe" if self.WINDOWS
+               else "/x/MeetingTranscriber")
+        expected = ("MeetingTranscriber.exe devices" if self.WINDOWS
+                    else "MeetingTranscriber devices")
         with mock.patch.object(common, "FROZEN", True), \
-             mock.patch.object(common.sys, "executable", r"C:\x\MeetingTranscriber.exe"):
-            self.assertEqual(common.cli_hint("devices"),
-                             "MeetingTranscriber.exe devices")
+             mock.patch.object(common.sys, "executable", exe):
+            self.assertEqual(common.cli_hint("devices"), expected)
 
 
 class TestListRecordings(unittest.TestCase):

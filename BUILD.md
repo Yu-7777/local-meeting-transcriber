@@ -9,7 +9,12 @@ macOS / Linux では動きません（移植ではなく作り直しになりま
 ## テスト
 
 ```
+rem Windows
 .venv\Scripts\python.exe -m unittest discover -s tests
+```
+```
+# Ubuntu
+.venv/bin/python -m unittest discover -s tests
 ```
 
 数秒で終わります。**モデルも録音も要りません** — 必要な入力はテストが
@@ -22,6 +27,7 @@ macOS / Linux では動きません（移植ではなく作り直しになりま
 | `tests/test_transcribe.py` | 入出力の組み立て（どの WAV をどこにどの名前で出すか）と出力書式 |
 | `tests/test_gui.py` | 画面の組み立て、未取得モデルの経路、子プロセス出力の振り分け |
 | `tests/test_entrypoints.py` | サブコマンドの振り分け、ショートカット、録音の削除 |
+| `tests/test_audio.py` | バックエンドの選択、録音の時刻づけ、デバイス一覧の作り方 |
 
 過去に取りこぼした不具合はテストに落としてあります。
 
@@ -40,8 +46,13 @@ macOS / Linux では動きません（移植ではなく作り直しになりま
 GUI のダイアログを開く操作（保存先の選択、改名、削除の確認）も通していません。
 
 **`move_to_trash` だけは実物で確かめています。** 取り違えると録音が復元不能に
-なるため、ごみ箱に実際に入ったかを PowerShell 経由で確認しています。
-そのぶん、テストを流すとごみ箱に一時フォルダが 1 つ残ります。
+なるため、ごみ箱に実際に入ったかを確認しています（Windows は PowerShell、
+Ubuntu は `gio list trash:///`）。そのぶん、テストを流すとごみ箱に一時フォルダが
+1 つ残ります。
+
+**両方の OS で流してください。** 片方でしか動かない経路は `sys.platform` で
+スキップします（スキップ数が OS で違うのは正常です）。音声バックエンドの
+選択を間違えると無音の録音になるので、そこだけはスキップせずに確認します。
 
 ### テストに価値があることの確認
 
@@ -153,6 +164,44 @@ BGM や音質の変化が「別の話者」として検出されるのを防ぐ�
 「録音の同期について」を参照してください。2 本の開始時刻の実測差
 （0.26〜0.36 秒）を下回っている必要があります。
 
+## 音声バックエンドの構成
+
+音声デバイスまわりだけが OS で大きく違うので、そこを 3 つのファイルに閉じて
+います。`record.py` や `gui.py` は `audio.py` しか見ません。
+
+```
+audio.py          sys.platform で下 2 つのどちらかを選ぶ（OS 判定はここだけ）
+audio_wasapi.py   Windows: PyAudioWPatch + Core Audio の通知 (IMMNotificationClient)
+audio_pulse.py    Linux:   libpulse を ctypes で直接呼ぶ（追加パッケージ不要）
+```
+
+バックエンドが備えるもの:
+
+| | 返すもの |
+|---|---|
+| `AudioSystem.list_devices()` | `(ループバック一覧, マイク一覧)`。要素は `(表示名, index)` |
+| `AudioSystem.resolve_loopback/resolve_mic(index)` | デバイス情報の dict |
+| `AudioSystem.open_stream(info, rate, ch, chunk, on_chunk)` | 開いたストリーム |
+| `DeviceWatcher(on_change)` | 着脱・既定変更の監視 |
+| `print_devices()` | `app.py devices` の表示 |
+
+デバイス情報の dict は PyAudio が返す形（`index` / `name` / `defaultSampleRate` /
+`maxInputChannels`）をそのまま踏襲しています。バックエンドを足す時に
+呼び出し側を書き換えずに済ませるためです。
+
+`on_chunk(ts, data, overflow)` の `ts` は「そのチャンクの末尾」の時刻です。
+バッファ遅延の補正はバックエンドの責任とし、`record.py` は届いた時刻を
+そのまま信じてよいことにしています（Linux 側の作り方は「録音の同期について」）。
+
+### Linux 側で追加パッケージが要らない理由
+
+`libpulse.so.0` はデスクトップ環境に最初から入っており、これを ctypes で呼べば
+デバイス列挙・録音・変更通知のすべてができます。PortAudio (`libportaudio2`) は
+Ubuntu の既定では入っておらず、入れても monitor ソースを一覧に出せません。
+
+PulseAudio のクライアント API を使うので、Ubuntu 22.04 の PulseAudio と
+24.04 の PipeWire のどちらでも同じコードが動きます。
+
 ## 録音の同期について
 
 2 本の WAV は別々のデバイスから録るため、開始時刻がそろいません。実測（4 時間
@@ -170,6 +219,29 @@ BGM や音質の変化が「別の話者」として検出されるのを防ぐ�
   0.3 秒ほど遅いためです。この差を先頭の無音で吸収しています。
 
 録音長と実時間のズレは最大 0.59 秒（76 分中、0.013%）でした。
+
+### Linux (PulseAudio / PipeWire) では
+
+同じ仕組みの上で、性質が 2 つ変わります（Ubuntu 24.04 + PipeWire 1.0.5 で実測）。
+
+| | Windows (WASAPI) | Linux (monitor) |
+|---|---|---|
+| 2 本の開始時刻の差 | 0.26〜0.36 秒 | 実測 0.000 秒（10 秒録音 × 複数回） |
+| 沈黙中のデータ | 返らない（穴が空く） | 無音が実時間で流れる |
+| 途中の欠落補完 | 沈黙のぶん発生する | 本当に取りこぼした時だけ |
+| デバイス一覧の取得 | 60〜75ms | 1.9ms |
+
+- **穴埋めの意味が変わります。** Linux で `gap_filled_sec` が出た場合、それは
+  沈黙ではなく**実際の取りこぼし**です（`overflows` も同時に増えます）。
+- **時刻はサンプル数から作ります。** 受け取ったバッファにはサーバ側に溜まって
+  いた分の遅れがあり、読めた瞬間の時刻を使うと時間軸が揺れます（`fragsize` を
+  指定しないと 1.7〜2.2 秒溜まる）。最初のチャンクで開始時刻を割り出し、以降は
+  累積サンプル数で決めて、実測とのズレが `RESYNC_SEC`（0.30 秒）を超えた時だけ
+  引き直します。
+- **停止していた出力の monitor は、最初のデータまで待たされることがあります。**
+  通常は 0.04〜0.14 秒ですが、起動後まだ一度も鳴っていない HDMI 出力では 1.4 秒
+  かかりました。この間は「相手 が応答待ち」と表示され、先頭は無音で埋まります
+  （時間軸は保たれます）。会議中は音が鳴っているため、実運用では起きにくい想定です。
 
 ## サブコマンド
 
@@ -196,11 +268,23 @@ exe 単体で CLI としても動きます（GUI から文字起こしを呼ぶ�
 | `Expand-Archive` で展開する | そもそも伝播しない |
 | `git clone` で取得する | そもそも付かない |
 
-### なぜ Python の公式インストーラなのか
+### なぜ Python の公式インストーラなのか（Windows）
 
 Python 本体には **PSF の署名**が付いており、スマート アプリ コントロールを
 確実に通過します。uv などが配布するサードパーティ製の Python は署名がなく、
 実測で `_ssl.pyd` がブロックされて動作しませんでした。
+
+### なぜ Ubuntu では apt なのか
+
+こちらに SAC はないので上の理由は効きません。それでもディストリの Python を
+使うのは、Ubuntu 22.04 / 24.04 が対象範囲（3.10〜3.13）を最初から満たしており、
+追加で落とすものが最小で済むためです。`setup.sh` が要求するのは
+`python3-venv` と `python3-tk` の 2 つだけで、これは Ubuntu で
+「Python を使う」時の普通の手順でもあります。
+
+代わりに standalone な Python（uv 等）を同梱する案もあります。sudo が不要に
+なる利点はありますが、100MB ほどのインタプリタを別途抱えることになるので、
+今は採っていません。
 
 ## 構成
 
@@ -214,16 +298,18 @@ local_transcription/
     config.py                      設定の読み書き（config.json）
     gui.py                         簡易 GUI（録音と文字起こしの実行のみ。結果はファイル出力）
     record.py                      2 ストリーム同時録音 → system.wav / mic.wav / meta.json
+    audio.py                       音声デバイスの OS 差を吸収する層（下 2 つを選ぶだけ）
+    audio_wasapi.py                Windows 実装 (WASAPI + Core Audio の通知)
+    audio_pulse.py                 Linux 実装 (PulseAudio / PipeWire。libpulse を ctypes で)
     transcribe.py                  文字起こし → transcript.txt
     diarization.py                 相手チャンネルの話者分離 (sherpa-onnx / --diarize 時のみ)
-    check_devices.py               WASAPI デバイス一覧
+    check_devices.py               デバイス一覧（表示の中身は各バックエンド）
     download_models.py             モデル事前取得
-    shortcut.py                    スタートメニューへの登録（--desktop でデスクトップにも）
+    shortcut.py                    スタートメニュー / アプリ一覧への登録（--desktop でデスクトップにも）
     common.py                      各所から使う小物（時刻整形・録音一覧・実行方法の案内）
-    device_watch.py                音声デバイスの着脱・既定変更をイベント駆動で監視 (GUI 用)
-gui.bat                            GUI 起動
-setup.bat                          初期セットアップ
-record.bat                         録音のショートカット
+gui.bat / gui.sh                   GUI 起動
+setup.bat / setup.sh               初期セットアップ
+record.bat / record.sh             録音のショートカット
 build.spec                         PyInstaller のビルド定義
 requirements.txt                   依存パッケージ（推移的な依存まですべてバージョン固定）
 requirements-dev.txt               ビルド用（PyInstaller）
@@ -233,6 +319,8 @@ recordings/                        録音データ
 ```
 
 ## ビルド
+
+**exe を作るのは Windows だけです**（Ubuntu 側はソース + `setup.sh` で配ります）。
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt

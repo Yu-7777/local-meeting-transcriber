@@ -3,5 +3,9 @@
 # どの環境で clone / ZIP 展開しても CRLF になるよう固定する。
 *.bat text eol=crlf
 
+# シェルスクリプトは CRLF だと shebang ごと壊れる (bad interpreter)。
+# Windows 側で編集されても LF のままにする。
+*.sh text eol=lf
+
 # 残りは触らない（Python は LF/CRLF どちらでも動くため）
 * -text

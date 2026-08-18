@@ -1,5 +1,7 @@
 # PyInstaller spec（onedir 構成。理由は BUILD.md「onedir にした理由」）
 
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 datas, binaries, hiddenimports = [], [], []
@@ -7,8 +9,12 @@ datas, binaries, hiddenimports = [], [], []
 # ネイティブ DLL とデータを丸ごと拾う必要があるパッケージ
 # comtypes は動的に生成した COM 型モジュールを imp/pkgutil 経由で読むため、
 # hiddenimports だけでは PyInstaller が見つけられない。collect_all で拾う。
-for pkg in ("ctranslate2", "onnxruntime", "sherpa_onnx", "av", "pyaudiowpatch",
-            "tokenizers", "comtypes"):
+packages = ["ctranslate2", "onnxruntime", "sherpa_onnx", "av", "tokenizers"]
+if sys.platform == "win32":
+    # 音声デバイス用。Windows にしか入らない（requirements.txt 参照）
+    packages += ["pyaudiowpatch", "comtypes"]
+
+for pkg in packages:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -22,7 +28,8 @@ hiddenimports += ["faster_whisper", "local_transcription", "local_transcription.
                   "local_transcription.check_devices", "local_transcription.download_models",
                   "local_transcription.gui", "local_transcription.apppaths",
                   "local_transcription.config", "local_transcription.common",
-                  "local_transcription.shortcut", "local_transcription.device_watch"]
+                  "local_transcription.shortcut", "local_transcription.audio",
+                  "local_transcription.audio_wasapi", "local_transcription.audio_pulse"]
 
 a = Analysis(
     ["app.py"],
