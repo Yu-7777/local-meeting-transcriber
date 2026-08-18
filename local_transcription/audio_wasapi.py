@@ -30,6 +30,9 @@ from . import common  # noqa: E402
 
 CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
 
+# 登録を外せなかった通知クライアント（DeviceWatcher.stop 参照）
+_ORPHANS = []
+
 
 class PROPERTYKEY(Structure):
     _fields_ = [("fmtid", GUID), ("pid", DWORD)]
@@ -133,6 +136,8 @@ class DeviceWatcher:
         self._keep_alive = threading.Event()
         self._ready = threading.Event()
         self._failed = None
+        self._enumerator = None
+        self._client = None
 
     def start(self, timeout=5.0):
         """監視を開始する。準備に失敗したら例外を投げる（呼び出し側で握り潰す想定）."""
@@ -156,7 +161,21 @@ class DeviceWatcher:
             self._ready.set()
             return
         self._ready.set()
-        self._keep_alive.wait()  # プロセス終了まで待つだけ（daemon なので join 不要）
+        self._keep_alive.wait()  # stop() されるまで待つだけ（daemon なので join 不要）
+
+    def stop(self):
+        """監視をやめる。登録を外してからスレッドを終わらせる."""
+        enumerator, client = self._enumerator, self._client
+        self._enumerator = self._client = None
+        self._keep_alive.set()
+        if enumerator is None or client is None:
+            return
+        try:
+            enumerator.UnregisterEndpointNotificationCallback(client)
+        except Exception:
+            # 外せなかった時に参照を捨てると、次の通知で解放済みの
+            # オブジェクトを呼ばれる。落とさないほうを優先して残す
+            _ORPHANS.append((enumerator, client))
 
 
 class Stream:

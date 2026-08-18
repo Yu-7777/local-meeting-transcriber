@@ -87,6 +87,7 @@ class App(ttk.Frame):
         self._timers = {}
         self._last_device_change = 0.0
         self._device_change_during_recording = False
+        self._watcher = None
 
         self._build_record_box()
         self._build_transcribe_box()
@@ -104,12 +105,16 @@ class App(ttk.Frame):
 
         「更新」ボタンでの手動更新は残るので、ここが使えない環境でも困らない。
         """
+        # 渡すのはキューだけにする。App を渡すと、通知を受け取る側のスレッドから
+        # Tk のオブジェクトに手が届いてしまう（tkinter は他スレッドから触ると
+        # 落ちる）。キューは thread-safe で、Tk とは無関係。
+        msg_queue = self.msg_queue
         try:
-            watcher = audio.DeviceWatcher(
-                lambda: self.msg_queue.put(("device_changed", None)))
-            watcher.start()
+            self._watcher = audio.DeviceWatcher(
+                lambda: msg_queue.put(("device_changed", None)))
+            self._watcher.start()
         except Exception:
-            pass
+            self._watcher = None
 
     # ---------------------------------------------------------------- 録音
     def _build_record_box(self):
@@ -634,10 +639,20 @@ class App(ttk.Frame):
         self._timers[func] = self.after(delay, func)
 
     def stop_polling(self):
-        """仕掛けた周期処理を全部止める。窓を閉じたあとに走らせないため."""
+        """仕掛けた周期処理とデバイス監視を止める。窓を閉じたあとに走らせないため.
+
+        監視は OS 側に接続を 1 本持つ（Linux では専用スレッドも）。閉じないと
+        窓を開け閉めするたびに積み上がる。
+        """
         for timer in self._timers.values():
             self.after_cancel(timer)   # 発火済みの ID を渡しても無害
         self._timers.clear()
+        if self._watcher is not None:
+            try:
+                self._watcher.stop()
+            except Exception:
+                pass      # 閉じる途中なので、ここで失敗しても進む
+            self._watcher = None
 
     def _drain_queue(self):
         try:

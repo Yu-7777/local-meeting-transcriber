@@ -34,6 +34,9 @@ class TestBackendSelection(unittest.TestCase):
         for name in ("list_devices", "resolve_loopback", "resolve_mic",
                      "open_stream", "close"):
             self.assertTrue(hasattr(audio.AudioSystem, name), name)
+        # stop() が無いと、窓を開け閉めするたびに接続が積み上がる
+        for name in ("start", "stop"):
+            self.assertTrue(hasattr(audio.DeviceWatcher, name), name)
 
 
 class TestTimeline(unittest.TestCase):

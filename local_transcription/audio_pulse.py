@@ -534,6 +534,12 @@ class DeviceWatcher:
         conn.subscribe(SUBSCRIBE_MASK, self._notify)
         self._conn = conn   # 参照を保持（GC されると通知が届かなくなる）
 
+    def stop(self):
+        """監視をやめ、接続とそのスレッドを片付ける."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
     def _notify(self):
         try:
             self._on_change()
