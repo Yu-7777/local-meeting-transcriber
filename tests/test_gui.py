@@ -123,6 +123,18 @@ class TestAppBuilds(GuiTestCase):
         self.app.stop_polling()
         self.assertEqual(self.app._timers, {})
 
+    def test_device_change_burst_refreshes_after_it_settles(self):
+        """1 回の抜き差しで通知は連続して来る。最後の 1 回を捨てると
+        一覧が古いまま残るので、間引いた時は後で見直す予約が要る."""
+        calls = []
+        with mock.patch.object(self.app, "refresh_devices",
+                               side_effect=lambda: calls.append(1)):
+            self.app._on_device_changed()   # 1 回目はその場で更新
+            self.app._on_device_changed()   # 続けて来た分は間引かれる
+            self.app._on_device_changed()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(self.app._on_device_changed, self.app._timers)
+
     def test_stop_polling_stops_the_device_watch(self):
         """監視は OS 側に接続を持つ。閉じないと窓の開け閉めで積み上がる."""
         stopped = []

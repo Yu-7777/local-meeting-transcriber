@@ -680,7 +680,12 @@ class App(ttk.Frame):
         """
         now = time.monotonic()
         if now - self._last_device_change < DEVICE_CHANGE_DEBOUNCE_SEC:
-            return  # 1 回の抜き差しで複数のイベントが連続するので間引く
+            # 1 回の抜き差しで通知が続けて来るので間引く。ただし捨てるだけに
+            # すると、最後の 1 回（＝構成が落ち着いた後の状態）を取りこぼして
+            # 一覧が古いまま残る。間隔を空けて、もう一度だけ見に行く
+            self._schedule(int(DEVICE_CHANGE_DEBOUNCE_SEC * 1000),
+                           self._on_device_changed)
+            return
         self._last_device_change = now
 
         if self.session is not None:
